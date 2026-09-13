@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +32,9 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,11 +48,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.fanji.mealnote.ui.components.AnimatedCounter
 import com.fanji.mealnote.ui.components.MiuixCard
+import com.fanji.mealnote.ui.components.MiuixSegmented
 import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.VerdictBadge
 import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import com.fanji.mealnote.ui.components.staggeredEnter
 import com.fanji.mealnote.ui.formatDayLabel
+import com.fanji.mealnote.ui.formatEstimatedAmount
 import java.io.File
 
 /**
@@ -64,6 +70,7 @@ fun FootprintScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val photoViewer = rememberPhotoViewerState()
+    var tab by rememberSaveable { mutableStateOf(FootprintTab.TIMELINE) }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -77,54 +84,32 @@ fun FootprintScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "header") {
-                FootprintHeader(
-                    totalCount = uiState.totalCount,
-                    goodCount = uiState.goodCount,
-                    mehCount = uiState.mehCount,
-                    badCount = uiState.badCount,
+                FootprintHeader(totalCount = uiState.totalCount)
+            }
+
+            item(key = "tabs") {
+                MiuixSegmented(
+                    options = FootprintTab.entries.toList(),
+                    selected = tab,
+                    onSelect = { tab = it },
+                    label = { it.label },
                 )
             }
 
-            item(key = "search") { SearchBox(uiState.query, viewModel::onQueryChange) }
+            when (tab) {
+                FootprintTab.TIMELINE -> timelineContent(
+                    uiState = uiState,
+                    onQueryChange = viewModel::onQueryChange,
+                    onOpenRestaurant = onOpenRestaurant,
+                    onPhotoClick = { entry, index ->
+                        photoViewer.open(entry.photos.map { it.filePath }, index)
+                    },
+                )
 
-            when {
-                uiState.isLoading -> item(key = "loading") {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
-                        contentAlignment = Alignment.Center,
-                    ) { CircularProgressIndicator() }
-                }
-
-                uiState.sections.isEmpty() -> item(key = "empty") {
-                    EmptyFootprint(isSearchMiss = uiState.isSearchMiss)
-                }
-
-                else -> uiState.sections.forEach { section ->
-                    item(key = "month-${section.title}") {
-                        Text(
-                            text = section.title,
-                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 2.dp),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    itemsIndexed(
-                        items = section.entries,
-                        key = { _, entry -> entry.record.id },
-                    ) { index, entry ->
-                        FootprintCard(
-                            entry = entry,
-                            onClick = { onOpenRestaurant(entry.record.restaurantId) },
-                            onPhotoClick = { photoIndex ->
-                                photoViewer.open(entry.photos.map { it.filePath }, photoIndex)
-                            },
-                            modifier = Modifier
-                                .animateItem()
-                                .staggeredEnter(index),
-                        )
-                    }
-                }
+                FootprintTab.STATS -> statsContent(
+                    uiState = uiState,
+                    onOpenRestaurant = onOpenRestaurant,
+                )
             }
         }
 
@@ -132,8 +117,378 @@ fun FootprintScreen(
     }
 }
 
+/**
+ * 「足迹」的两种查看方式。
+ *
+ * 用分段控件而不是把统计做成第四个标签页：两者回答的是同一批数据的两个问题
+ * （「吃了什么」与「一共吃了多少」），放在一起切换比让用户在底部导航里
+ * 来回比较更自然，底部也得以保持三个入口。
+ */
+private enum class FootprintTab(val label: String) {
+    /** 按月份分组的时间线，用于回顾具体吃了什么。 */
+    TIMELINE("时间线"),
+
+    /** 聚合统计，用于回答「一共吃了多少、花了多少」。 */
+    STATS("统计"),
+}
+
+/** 时间线内容。抽成 [LazyListScope] 扩展是为了让 [FootprintScreen] 本体保持可读。 */
+private fun LazyListScope.timelineContent(
+    uiState: FootprintUiState,
+    onQueryChange: (String) -> Unit,
+    onOpenRestaurant: (Long) -> Unit,
+    onPhotoClick: (FootprintEntry, Int) -> Unit,
+) {
+    item(key = "search") { SearchBox(uiState.query, onQueryChange) }
+
+    when {
+        uiState.isLoading -> item(key = "loading") {
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
+                contentAlignment = Alignment.Center,
+            ) { CircularProgressIndicator() }
+        }
+
+        uiState.sections.isEmpty() -> item(key = "empty") {
+            EmptyFootprint(isSearchMiss = uiState.isSearchMiss)
+        }
+
+        else -> uiState.sections.forEach { section ->
+            item(key = "month-${section.title}") {
+                Text(
+                    text = section.title,
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 2.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            itemsIndexed(
+                items = section.entries,
+                key = { _, entry -> entry.record.id },
+            ) { index, entry ->
+                FootprintCard(
+                    entry = entry,
+                    onClick = { onOpenRestaurant(entry.record.restaurantId) },
+                    onPhotoClick = { photoIndex -> onPhotoClick(entry, photoIndex) },
+                    modifier = Modifier
+                        .animateItem()
+                        .staggeredEnter(index),
+                )
+            }
+        }
+    }
+}
+
+/** 统计内容。 */
+private fun LazyListScope.statsContent(
+    uiState: FootprintUiState,
+    onOpenRestaurant: (Long) -> Unit,
+) {
+    if (!uiState.hasStats) {
+        item(key = "stats-empty") { EmptyStats() }
+        return
+    }
+
+    item(key = "stats-overview") { OverviewCard(uiState) }
+    item(key = "stats-spend") { SpendCard(uiState) }
+    item(key = "stats-monthly") { MonthlyCard(uiState.monthlyCounts) }
+    item(key = "stats-verdict") { VerdictCard(uiState) }
+    if (uiState.topRestaurants.isNotEmpty()) {
+        item(key = "stats-top") {
+            TopRestaurantsCard(uiState.topRestaurants, onOpenRestaurant)
+        }
+    }
+}
+
+/** 概览：三个关键数字。 */
 @Composable
-private fun FootprintHeader(totalCount: Int, goodCount: Int, mehCount: Int, badCount: Int) {
+private fun OverviewCard(uiState: FootprintUiState) {
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 2.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            StatCell("今年", uiState.yearCount, "次", Modifier.weight(1f))
+            StatCell("去过", uiState.visitedCount, "家", Modifier.weight(1f))
+            StatCell("累计", uiState.totalCount, "次", Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun StatCell(label: String, value: Int, unit: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            AnimatedCounter(
+                value = value,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(2.dp))
+            Text(
+                text = unit,
+                modifier = Modifier.padding(bottom = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * 花费估算卡。
+ *
+ * 金额来自**自由文本的解析**，因此文案必须始终带着「估算」二字，
+ * 并明确说明可识别的记录比例 —— 否则用户会把它当成精确的账本。
+ */
+@Composable
+private fun SpendCard(uiState: FootprintUiState) {
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 2.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        Text(
+            text = "今年花费（估算）",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        val spend = uiState.estimatedSpendThisYear
+        if (spend == null) {
+            Text(
+                text = "还没有能识别的金额",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                text = spend.formatEstimatedAmount(),
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = buildString {
+                val recognized = uiState.amountRecognizedCount
+                val unrecognized = uiState.amountUnrecognizedCount
+                append("今年 $recognized 条记录里有可识别的数字")
+                if (unrecognized > 0) append("，另有 $unrecognized 条写的是文字")
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "按记录里的数字估算，不是精确账目。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+        )
+    }
+}
+
+/** 最近 12 个月的用餐次数。 */
+@Composable
+private fun MonthlyCard(counts: List<MonthlyCount>) {
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 2.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        val peak = counts.maxOfOrNull { it.count } ?: 0
+        Text("最近 12 个月", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = if (peak == 0) "这段时间还没有记录" else "最多的一月吃了 $peak 次",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(18.dp))
+        MonthlyBarChart(counts)
+    }
+}
+
+@Composable
+private fun MonthlyBarChart(counts: List<MonthlyCount>) {
+    val peak = (counts.maxOfOrNull { it.count } ?: 0).coerceAtLeast(1)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        counts.forEachIndexed { index, month ->
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Bottom,
+            ) {
+                Text(
+                    text = if (month.count > 0) month.count.toString() else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(4.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(
+                            // 有记录时最低 6dp，保证「吃过一次」和「一次没吃」在视觉上分得开。
+                            if (month.count > 0) {
+                                (MAX_BAR_HEIGHT * (month.count.toFloat() / peak)).coerceAtLeast(6.dp)
+                            } else {
+                                3.dp
+                            },
+                        )
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(
+                            if (month.count > 0) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.outlineVariant
+                            },
+                        ),
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    // 12 个月份标签在窄屏上会挤成一团，隔一个显示一个；
+                    // 最后一个月（也就是当前月）始终显示，避免用户找不到「现在」。
+                    text = if (index % 2 == 0 || index == counts.lastIndex) month.label else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** 评价分布。与时间线页顶部共用同一套配色与文案。 */
+@Composable
+private fun VerdictCard(uiState: FootprintUiState) {
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 2.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        Text("评价分布", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(14.dp))
+        VerdictDistribution(uiState.goodCount, uiState.mehCount, uiState.badCount)
+    }
+}
+
+/** 常去的店。 */
+@Composable
+private fun TopRestaurantsCard(
+    ranks: List<RestaurantRank>,
+    onOpenRestaurant: (Long) -> Unit,
+) {
+    val peak = ranks.firstOrNull()?.count ?: 1
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 2.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        Text("去得最多的店", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(14.dp))
+        ranks.forEachIndexed { index, rank ->
+            if (index > 0) Spacer(Modifier.height(14.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenRestaurant(rank.restaurantId) },
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${index + 1}",
+                        modifier = Modifier.width(20.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = rank.name,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "${rank.count} 次",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(rank.count.toFloat() / peak)
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.primary),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyStats() {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(MaterialTheme.shapes.large)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Rounded.Restaurant,
+                contentDescription = null,
+                modifier = Modifier.size(32.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+        Spacer(Modifier.height(18.dp))
+        Text("还没有可统计的数据", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "记录几次用餐之后，这里会显示次数、花费与常去的店。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** 柱状图的最大柱高。 */
+private val MAX_BAR_HEIGHT = 72.dp
+
+/**
+ * 页面头部。
+ *
+ * 只保留「一共吃了多少次」这一个数字，评价分布与其它聚合指标都移到「统计」分段 ——
+ * 头部在两个分段下都会显示，若把统计信息放进来，切到统计页就会看到同一组数字出现两次。
+ */
+@Composable
+private fun FootprintHeader(totalCount: Int) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 2.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -141,7 +496,7 @@ private fun FootprintHeader(totalCount: Int, goodCount: Int, mehCount: Int, badC
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("足迹", style = MaterialTheme.typography.headlineLarge)
             Text(
-                "每一次吃饭都记在这里，按时间倒序排列。",
+                "每一次吃饭都记在这里。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -161,7 +516,6 @@ private fun FootprintHeader(totalCount: Int, goodCount: Int, mehCount: Int, badC
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            VerdictDistribution(goodCount, mehCount, badCount)
         }
     }
 }

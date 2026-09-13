@@ -83,3 +83,49 @@ fun Long.formatStorageSize(): String {
     }
     return String.format(Locale.US, "%.1f %s", value, units[unitIndex])
 }
+
+// ─────────────────────────── 花费估算 ───────────────────────────
+
+/** 匹配整数或小数。 */
+private val amountPattern = Regex("""\d+(?:\.\d+)?""")
+
+/** 千分位逗号：只在「数字 + 逗号 + 三位数字」的位置移除，避免误伤其它逗号。 */
+private val thousandSeparatorPattern = Regex("""(?<=\d),(?=\d{3})""")
+
+/**
+ * 从「花费」自由文本中估算金额，无法识别时返回 `null`。
+ *
+ * 「花费」刻意设计成自由文本（「人均 60 左右」这类表述无法用整数表达），
+ * 因此统计只能**估算**。取文本中**最大**的数字而不是第一个：
+ *
+ * | 输入 | 取第一个 | 取最大（本实现） |
+ * | --- | --- | --- |
+ * | `128` | 128 | 128 |
+ * | `人均60` | 60 | 60 |
+ * | `3个人吃了240` | 3 ❌ | 240 ✅ |
+ * | `约200` | 200 | 200 |
+ *
+ * 已知偏差（界面必须标注「估算」而不是「合计」）：
+ * - `30-40` 会取 40，偏大；
+ * - `人均60` 是单价而非整桌金额，无法据此推算总消费。
+ *
+ * 先移除千分位逗号：`1,280` 若不移除会被切成 `1` 与 `280`，最大值变成 280。
+ */
+fun String.parseEstimatedAmount(): Double? =
+    thousandSeparatorPattern.replace(this, "")
+        .let(amountPattern::findAll)
+        .mapNotNull { it.value.toDoubleOrNull() }
+        .maxOrNull()
+
+/**
+ * 把估算金额格式化为便于阅读的金额文案。
+ *
+ * 不显示小数位：估算本身就有误差，保留小数会制造「很精确」的错觉。
+ * 超过 1 万时改用「万」，避免长数字破坏统计卡的排版。
+ */
+fun Double.formatEstimatedAmount(): String = when {
+    this < 10_000 -> "¥${roundToLong()}"
+    else -> String.format(Locale.US, "¥%.1f万", this / 10_000)
+}
+
+private fun Double.roundToLong(): Long = kotlin.math.round(this).toLong()

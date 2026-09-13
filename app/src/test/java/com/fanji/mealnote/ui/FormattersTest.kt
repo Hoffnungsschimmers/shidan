@@ -114,4 +114,55 @@ class FormattersTest {
             java.util.TimeZone.setDefault(utc)
         }
     }
+
+    // ─────────────────────────── 花费估算 ───────────────────────────
+
+    @Test
+    fun `纯数字直接识别`() {
+        assertEquals(128.0, "128".parseEstimatedAmount())
+        assertEquals(88.5, "88.5".parseEstimatedAmount())
+    }
+
+    @Test
+    fun `带前缀或后缀的文字不影响识别`() {
+        assertEquals(60.0, "人均60".parseEstimatedAmount())
+        assertEquals(200.0, "约200".parseEstimatedAmount())
+        assertEquals(88.0, "¥88/人".parseEstimatedAmount())
+    }
+
+    @Test
+    fun `取最大数字而非第一个`() {
+        // 「3个人吃了240」若取第一个数字会得到 3，明显错误。
+        assertEquals(240.0, "3个人吃了240".parseEstimatedAmount())
+        assertEquals(158.0, "两个人 158".parseEstimatedAmount())
+    }
+
+    @Test
+    fun `千分位逗号先被移除`() {
+        // 不移除逗号会切成 1 与 280，最大值变成 280。
+        assertEquals(1280.0, "1,280".parseEstimatedAmount())
+    }
+
+    @Test
+    fun `区间取较大值`() {
+        // 已知偏差：30-40 会取 40，偏大。锁定这个行为，避免以后被当成 bug 改掉
+        // 而破坏「取最大数字」这一条更重要的规则。
+        assertEquals(40.0, "30-40".parseEstimatedAmount())
+    }
+
+    @Test
+    fun `无法识别时返回null`() {
+        assertEquals(null, "".parseEstimatedAmount())
+        assertEquals(null, "忘了".parseEstimatedAmount())
+        assertEquals(null, "很贵".parseEstimatedAmount())
+    }
+
+    @Test
+    fun `金额文案不显示小数且超过一万改用万`() {
+        assertEquals("¥128", 128.0.formatEstimatedAmount())
+        assertEquals("¥128", 128.4.formatEstimatedAmount())
+        assertEquals("¥129", 128.6.formatEstimatedAmount())
+        assertEquals("¥9999", 9999.0.formatEstimatedAmount())
+        assertEquals("¥1.2万", 12_340.0.formatEstimatedAmount())
+    }
 }

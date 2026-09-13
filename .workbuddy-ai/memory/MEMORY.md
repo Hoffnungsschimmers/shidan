@@ -89,11 +89,11 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 
 ## 当前版本与交付
 
-- **v0.3.1**（versionCode 4）。花费字段、MIUIx 视觉重做、底部导航与信息架构重排、
-  玻璃材质、全屏照片查看器均已完成。
-- 交付物在 `安装包/`：`味笺-v0.3.1-release.apk`（已签名，2,029,291 B，
-  sha256 `fbed089e8c1ea7a1704bf4cc9e5cc23ea4725fd808534d4c8091c60895f3d14a`）、
-  `味笺-v0.3.1-debug.apk`（18,818,241 B）。
+- **v0.3.2**（versionCode 5）。花费字段、MIUIx 视觉重做、底部导航与信息架构重排、
+  玻璃材质、全屏照片查看器、统计页均已完成。
+- 交付物在 `安装包/`：`味笺-v0.3.2-release.apk`（已签名，2,045,675 B，
+  sha256 `758b66820cab542c0636d41401f9ed8684b6fddaafb6dc85d4b8eb39fc98e7cb`）、
+  `味笺-v0.3.2-debug.apk`（18,851,009 B）。
 - 签名密钥库 `mealnote-release.jks`（项目根目录），凭据在 `local.properties`。
   `.gitignore` 已排除 `*.jks` / `local.properties` / `*.apk`。
   **密钥库是单点故障**：丢失后已安装用户无法覆盖升级。
