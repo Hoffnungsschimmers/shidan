@@ -89,10 +89,11 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 
 ## 当前版本与交付
 
-- **v0.3.0**（versionCode 3）。花费字段、MIUIx 视觉重做、底部导航与信息架构重排已完成。
-- 交付物在 `安装包/`：`味笺-v0.3.0-release.apk`（已签名，2,012,907 B，
-  sha256 `7db332717f2fa12304c6b3f955a21a0683ef5c3cfe1cdccb774e6c0c829e52a0`）、
-  `味笺-v0.3.0-debug.apk`（18,827,531 B）。
+- **v0.3.1**（versionCode 4）。花费字段、MIUIx 视觉重做、底部导航与信息架构重排、
+  玻璃材质、全屏照片查看器均已完成。
+- 交付物在 `安装包/`：`味笺-v0.3.1-release.apk`（已签名，2,029,291 B，
+  sha256 `fbed089e8c1ea7a1704bf4cc9e5cc23ea4725fd808534d4c8091c60895f3d14a`）、
+  `味笺-v0.3.1-debug.apk`（18,818,241 B）。
 - 签名密钥库 `mealnote-release.jks`（项目根目录），凭据在 `local.properties`。
   `.gitignore` 已排除 `*.jks` / `local.properties` / `*.apk`。
   **密钥库是单点故障**：丢失后已安装用户无法覆盖升级。
@@ -102,12 +103,27 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 - 判定 APK 是否签名**必须用 `apksigner verify`**：本项目只用 v2 方案，
   签名块在 ZIP 中央目录之后，解包看不到 `META-INF/*.RSA` 属正常现象。
 
+## 版本控制
+
+- 已是 Git 仓库（`main` 分支），2026-09-13 初始化。
+- **提交前必须确认 `local.properties` 与 `mealnote-release.jks` 未被纳入**
+  （前者含签名口令），用 `git ls-files --error-unmatch <file>` 逐个验证。
+
+## 明确评估后放弃的功能（不要贸然加回）
+
+**从用餐照片设置封面**。它会让 `restaurants.recommendationPhotoPath` 与
+`photos.filePath` 指向同一文件，而现有所有删除路径都会因此破坏另一处引用的数据：
+`updateRestaurant` 换封面删旧图、`deleteDiningRecord` 删记录照片、
+`EditRestaurantViewModel.onCleared` 取消编辑删非原始封面。
+
+要支持它必须先把全局不变式改成「**磁盘文件只在没有任何数据库行引用时才允许删除**」，
+并让所有删除路径统一走带引用的守卫。这是一次涉及数据安全的仓库层重构，
+必须独立进行并配套测试。
+
 ## 其他
 
-- 项目**不是** Git 仓库（截至 2026-09-13），`.gitignore` 已就绪。**建议尽快初始化**，
-  否则改坏了无法回滚。
 - 文档：`README.md`（构建与环境）、`DESIGN_SYSTEM.md`（设计规范）、
   `CHANGELOG.md`（变更）、`PROJECT_PLAN.md`（路线图）、`HANDOFF.md`（交接）。
-- 未做（V0.3 剩余候选）：图片大图预览、封面设置与排序、统计与年度回顾、分享卡片、
+- 未做（V0.3 剩余候选）：封面设置与排序、统计与年度回顾、分享卡片、
   深色模式手动切换、无障碍细化；`AppDatabaseMigrationTest` 仪器化测试从未运行
   （需真机/模拟器；本机改用内存 SQLite 做了迁移等价性验证，见当日日志）。
