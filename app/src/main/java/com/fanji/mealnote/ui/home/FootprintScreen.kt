@@ -1,6 +1,7 @@
 package com.fanji.mealnote.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -44,7 +44,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.fanji.mealnote.ui.components.AnimatedCounter
 import com.fanji.mealnote.ui.components.MiuixCard
+import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.VerdictBadge
+import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import com.fanji.mealnote.ui.components.staggeredEnter
 import com.fanji.mealnote.ui.formatDayLabel
 import java.io.File
@@ -61,64 +63,72 @@ fun FootprintScreen(
     viewModel: FootprintViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val photoViewer = rememberPhotoViewerState()
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = 20.dp,
-            end = 20.dp,
-            top = 10.dp,
-            bottom = MainContentBottomPadding,
-        ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item(key = "header") {
-            FootprintHeader(
-                totalCount = uiState.totalCount,
-                goodCount = uiState.goodCount,
-                mehCount = uiState.mehCount,
-                badCount = uiState.badCount,
-            )
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                end = 20.dp,
+                top = 10.dp,
+                bottom = MainContentBottomPadding,
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item(key = "header") {
+                FootprintHeader(
+                    totalCount = uiState.totalCount,
+                    goodCount = uiState.goodCount,
+                    mehCount = uiState.mehCount,
+                    badCount = uiState.badCount,
+                )
+            }
+
+            item(key = "search") { SearchBox(uiState.query, viewModel::onQueryChange) }
+
+            when {
+                uiState.isLoading -> item(key = "loading") {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { CircularProgressIndicator() }
+                }
+
+                uiState.sections.isEmpty() -> item(key = "empty") {
+                    EmptyFootprint(isSearchMiss = uiState.isSearchMiss)
+                }
+
+                else -> uiState.sections.forEach { section ->
+                    item(key = "month-${section.title}") {
+                        Text(
+                            text = section.title,
+                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 2.dp),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    itemsIndexed(
+                        items = section.entries,
+                        key = { _, entry -> entry.record.id },
+                    ) { index, entry ->
+                        FootprintCard(
+                            entry = entry,
+                            onClick = { onOpenRestaurant(entry.record.restaurantId) },
+                            onPhotoClick = { photoIndex ->
+                                photoViewer.open(entry.photos.map { it.filePath }, photoIndex)
+                            },
+                            modifier = Modifier
+                                .animateItem()
+                                .staggeredEnter(index),
+                        )
+                    }
+                }
+            }
         }
 
-        item(key = "search") { SearchBox(uiState.query, viewModel::onQueryChange) }
-
-        when {
-            uiState.isLoading -> item(key = "loading") {
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
-                    contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator() }
-            }
-
-            uiState.sections.isEmpty() -> item(key = "empty") {
-                EmptyFootprint(isSearchMiss = uiState.isSearchMiss)
-            }
-
-            else -> uiState.sections.forEach { section ->
-                item(key = "month-${section.title}") {
-                    Text(
-                        text = section.title,
-                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 2.dp),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                itemsIndexed(
-                    items = section.entries,
-                    key = { _, entry -> entry.record.id },
-                ) { index, entry ->
-                    FootprintCard(
-                        entry = entry,
-                        onClick = { onOpenRestaurant(entry.record.restaurantId) },
-                        modifier = Modifier
-                            .animateItem()
-                            .staggeredEnter(index),
-                    )
-                }
-            }
-        }
+        PhotoViewerHost(photoViewer)
     }
 }
 
@@ -271,6 +281,7 @@ private fun SearchBox(query: String, onQueryChange: (String) -> Unit) {
 private fun FootprintCard(
     entry: FootprintEntry,
     onClick: () -> Unit,
+    onPhotoClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val record = entry.record
@@ -327,13 +338,14 @@ private fun FootprintCard(
         if (entry.photos.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(entry.photos.take(MAX_TIMELINE_PHOTOS), key = { it.id }) { photo ->
+                itemsIndexed(entry.photos.take(MAX_TIMELINE_PHOTOS), key = { _, photo -> photo.id }) { index, photo ->
                     AsyncImage(
                         model = File(photo.filePath),
-                        contentDescription = "${entry.restaurantName}的用餐照片",
+                        contentDescription = "${entry.restaurantName}的用餐照片，点击查看大图",
                         modifier = Modifier
                             .size(width = 104.dp, height = 82.dp)
-                            .clip(MaterialTheme.shapes.small),
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable { onPhotoClick(index) },
                         contentScale = ContentScale.Crop,
                     )
                 }

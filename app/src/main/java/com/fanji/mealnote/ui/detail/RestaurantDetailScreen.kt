@@ -1,6 +1,7 @@
 package com.fanji.mealnote.ui.detail
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,11 +66,13 @@ import com.fanji.mealnote.ui.components.MiuixButton
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixIconButton
 import com.fanji.mealnote.ui.components.PhotoPlaceholder
+import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.SectionHeader
 import com.fanji.mealnote.ui.components.StatusBadge
 import com.fanji.mealnote.ui.components.VerdictBadge
 import com.fanji.mealnote.ui.components.glassBackdropSource
 import com.fanji.mealnote.ui.components.rememberGlassBackdrop
+import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import com.fanji.mealnote.ui.formatMealDate
 import java.io.File
 
@@ -102,6 +105,7 @@ fun RestaurantDetailScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val backdrop = rememberGlassBackdrop()
     val listState = rememberLazyListState()
+    val photoViewer = rememberPhotoViewerState()
 
     LaunchedEffect(restaurantId) { viewModel.setRestaurantId(restaurantId) }
     LaunchedEffect(uiState.deletionCompleted) {
@@ -146,6 +150,9 @@ fun RestaurantDetailScreen(
                             detail = detail,
                             onAddVisit = onAddVisit,
                             hasRecords = uiState.visits.isNotEmpty(),
+                            onCoverClick = {
+                                photoViewer.open(listOf(detail.restaurant.recommendationPhotoPath), 0)
+                            },
                         )
                     }
 
@@ -181,6 +188,12 @@ fun RestaurantDetailScreen(
                                 recordWithPhotos = recordWithPhotos,
                                 onEdit = { onEditVisit(recordWithPhotos.record.id) },
                                 onDelete = { viewModel.requestDeleteRecord(recordWithPhotos.record.id) },
+                                onPhotoClick = { index ->
+                                    photoViewer.open(
+                                        recordWithPhotos.photos.sortedBy { it.sortOrder }.map { it.filePath },
+                                        index,
+                                    )
+                                },
                                 modifier = Modifier
                                     .animateItem()
                                     .padding(horizontal = 20.dp, vertical = 6.dp),
@@ -271,6 +284,9 @@ fun RestaurantDetailScreen(
                 }
             }
         }
+
+        // 查看器挂在最外层：必须是根容器的最后一个子节点，否则会被玻璃栏与悬浮按钮压住。
+        PhotoViewerHost(photoViewer)
     }
 
     uiState.pendingDeleteRecordId?.let {
@@ -301,21 +317,25 @@ private fun HeroSection(
     detail: RestaurantWithRecords,
     onAddVisit: () -> Unit,
     hasRecords: Boolean,
+    onCoverClick: () -> Unit,
 ) {
     val restaurant = detail.restaurant
+    val hasCover = restaurant.recommendationPhotoPath.isNotBlank()
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(HERO_HEIGHT + HERO_OVERLAP),
     ) {
-        if (restaurant.recommendationPhotoPath.isNotBlank()) {
+        if (hasCover) {
             AsyncImage(
                 model = File(restaurant.recommendationPhotoPath),
-                contentDescription = "${restaurant.name}的封面图片",
+                contentDescription = "${restaurant.name}的封面图片，点击查看大图",
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(HERO_HEIGHT)
-                    .align(Alignment.TopCenter),
+                    .align(Alignment.TopCenter)
+                    // 只有真的有图才让它可以点开，否则会打开一个空白查看器。
+                    .clickable(onClick = onCoverClick),
                 contentScale = ContentScale.Crop,
             )
         } else {
@@ -434,6 +454,7 @@ private fun VisitCard(
     recordWithPhotos: DiningRecordWithPhotos,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onPhotoClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val record = recordWithPhotos.record
@@ -494,14 +515,15 @@ private fun VisitCard(
             val ordered = recordWithPhotos.photos.sortedBy { it.sortOrder }
             Spacer(Modifier.height(12.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(ordered, key = { it.id }) { photo ->
+                itemsIndexed(ordered, key = { _, photo -> photo.id }) { index, photo ->
                     AsyncImage(
                         model = File(photo.filePath),
                         // 逐张编号描述：多张照片若使用同一描述，屏幕阅读器无法区分彼此。
-                        contentDescription = "用餐照片，共 ${ordered.size} 张",
+                        contentDescription = "用餐照片，共 ${ordered.size} 张，点击查看大图",
                         modifier = Modifier
                             .size(width = 124.dp, height = 98.dp)
-                            .clip(MaterialTheme.shapes.small),
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable { onPhotoClick(index) },
                         contentScale = ContentScale.Crop,
                     )
                 }

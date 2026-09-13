@@ -39,8 +39,10 @@ import com.fanji.mealnote.ui.components.MiuixButton
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixTextField
 import com.fanji.mealnote.ui.components.MiuixTopBar
+import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.SelectedPhoto
 import com.fanji.mealnote.ui.components.SectionHeader
+import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import java.io.File
 
 /**
@@ -58,6 +60,7 @@ fun AddRestaurantScreen(
     viewModel: AddRestaurantViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val photoViewer = rememberPhotoViewerState()
 
     // 用 rememberSaveable 保存相机目标文件路径：拍照会短暂离开本 Activity，
     // 低内存时进程可能被回收，普通 remember 会在重建后丢失该路径，
@@ -169,7 +172,12 @@ fun AddRestaurantScreen(
                             })
                         }
                         itemsIndexed(uiState.photoPaths, key = { _, path -> path }) { index, path ->
-                            SelectedPhoto(path, "餐厅封面图片", onRemove = { viewModel.removePhoto(index) })
+                            SelectedPhoto(
+                                path = path,
+                                contentDescription = "餐厅封面图片",
+                                onRemove = { viewModel.removePhoto(index) },
+                                onPreview = { photoViewer.open(uiState.photoPaths, index) },
+                            )
                         }
                     }
                 }
@@ -200,4 +208,6 @@ fun AddRestaurantScreen(
                 .padding(horizontal = 20.dp, vertical = 14.dp),
         )
     }
+
+    PhotoViewerHost(photoViewer)
 }

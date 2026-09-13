@@ -34,7 +34,8 @@
 
 - MIUIx / HyperOS 风格：中性冷灰底、纯白浮层、大圆角、柔和投影、弹簧动效；
 - 底部导航栏、详情页顶栏与操作栏使用 **Liquid Glass** 玻璃材质；
-  API 31+ 为真实背景模糊（`GraphicsLayer` + `RenderEffect`），低版本自动降级为拟态玻璃。
+  API 31+ 为真实背景模糊（`GraphicsLayer` + `RenderEffect`），低版本自动降级为拟态玻璃；
+- 全屏照片查看器：左右滑动切换、双击缩放、放大后拖动平移。
 
 完整设计规范见 [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md)，路线图见 [PROJECT_PLAN.md](PROJECT_PLAN.md)，版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 

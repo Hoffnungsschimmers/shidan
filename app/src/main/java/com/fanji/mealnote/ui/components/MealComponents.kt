@@ -1,6 +1,7 @@
 package com.fanji.mealnote.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -289,6 +290,9 @@ fun CameraPhotoAction(onClick: () -> Unit, modifier: Modifier = Modifier) =
  * 使用 [AsyncImage] 时必须显式指定目标尺寸（此处由 [size] 决定），Coil 会据此
  * 对原图做下采样解码。若省略尺寸，Coil 会按图片原始分辨率解码，一张 2048px 的照片
  * 在列表中会占用约 16MB 内存，多图页面极易 OOM。
+ *
+ * [onPreview] 非空时点击缩略图可看大图 —— 导入后需要确认「选对没有」，
+ * 缩略图尺寸（92dp）不足以判断，尤其是构图相近的照片。
  */
 @Composable
 fun SelectedPhoto(
@@ -297,12 +301,16 @@ fun SelectedPhoto(
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
     size: Int = 92,
+    onPreview: (() -> Unit)? = null,
 ) {
     Box(modifier = modifier.size(size.dp)) {
         AsyncImage(
             model = File(path),
             contentDescription = contentDescription,
-            modifier = Modifier.fillMaxSize().clip(MaterialTheme.shapes.medium),
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(MaterialTheme.shapes.medium)
+                .then(if (onPreview != null) Modifier.clickable(onClick = onPreview) else Modifier),
             contentScale = ContentScale.Crop,
         )
         IconButton(

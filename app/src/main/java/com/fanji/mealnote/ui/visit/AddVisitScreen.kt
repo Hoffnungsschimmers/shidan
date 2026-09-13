@@ -67,8 +67,10 @@ import com.fanji.mealnote.ui.components.MiuixButton
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixTextField
 import com.fanji.mealnote.ui.components.MiuixTopBar
+import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.SectionHeader
 import com.fanji.mealnote.ui.components.SelectedPhoto
+import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import com.fanji.mealnote.ui.displayName
 import com.fanji.mealnote.ui.formatMealDate
 import java.io.File
@@ -90,6 +92,7 @@ fun AddVisitScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val restaurantName by viewModel.restaurantName.collectAsStateWithLifecycle()
+    val photoViewer = rememberPhotoViewerState()
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
     // 保存相机目标文件路径而非 File 对象：拍照期间进程可能被回收，
     // 普通 remember 无法保存不可序列化的 File，重建后会丢失拍摄结果的关联。
@@ -244,7 +247,12 @@ fun AddVisitScreen(
                             }
                         }
                         itemsIndexed(uiState.photoPaths, key = { _, path -> path }) { index, path ->
-                            SelectedPhoto(path, "用餐照片（选填）", onRemove = { viewModel.removePhoto(index) })
+                            SelectedPhoto(
+                                path = path,
+                                contentDescription = "用餐照片（选填）",
+                                onRemove = { viewModel.removePhoto(index) },
+                                onPreview = { photoViewer.open(uiState.photoPaths, index) },
+                            )
                         }
                     }
                 }
@@ -301,6 +309,8 @@ fun AddVisitScreen(
             shape = MaterialTheme.shapes.extraLarge,
         ) { DatePicker(state = state) }
     }
+
+    PhotoViewerHost(photoViewer)
 }
 
 /**

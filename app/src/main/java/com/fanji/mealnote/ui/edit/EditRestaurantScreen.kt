@@ -42,8 +42,10 @@ import com.fanji.mealnote.ui.components.MiuixButton
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixTextField
 import com.fanji.mealnote.ui.components.MiuixTopBar
+import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.SectionHeader
 import com.fanji.mealnote.ui.components.SelectedPhoto
+import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import java.io.File
 
 /** 编辑餐厅资料。布局与新建页保持一致，差异只在于进入时已有数据、以及按钮文案。 */
@@ -55,6 +57,7 @@ fun EditRestaurantScreen(
     viewModel: EditRestaurantViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val photoViewer = rememberPhotoViewerState()
     var pendingCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(restaurantId) { viewModel.setRestaurantId(restaurantId) }
@@ -154,7 +157,12 @@ fun EditRestaurantScreen(
                                     })
                                 }
                                 itemsIndexed(uiState.photoPaths, key = { _, path -> path }) { index, path ->
-                                    SelectedPhoto(path, "餐厅封面图片", onRemove = { viewModel.removePhoto(index) })
+                                    SelectedPhoto(
+                                        path = path,
+                                        contentDescription = "餐厅封面图片",
+                                        onRemove = { viewModel.removePhoto(index) },
+                                        onPreview = { photoViewer.open(uiState.photoPaths, index) },
+                                    )
                                 }
                             }
                         }
@@ -187,4 +195,6 @@ fun EditRestaurantScreen(
             }
         }
     }
+
+    PhotoViewerHost(photoViewer)
 }
