@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="file" path="photos/" />
+    <exclude domain="database" path="meal_note.db" />
+</full-backup-content>

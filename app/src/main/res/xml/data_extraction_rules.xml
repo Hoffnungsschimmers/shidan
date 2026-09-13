@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="photos/" />
+        <exclude domain="database" path="meal_note.db" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="photos/" />
+        <exclude domain="database" path="meal_note.db" />
+    </device-transfer>
+</data-extraction-rules>
