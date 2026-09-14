@@ -21,6 +21,37 @@ import java.io.File
 import javax.inject.Inject
 
 /**
+ * 从「表单里当前的图片」中挑出**可以立即回收**的那些。
+ *
+ * ## 为什么不能简单地「删掉上一张」
+ *
+ * 表单里的 `photoPaths` 在首次加载时就是**数据库当前的封面**。如果换图时无条件
+ * 把上一张删掉，就会出现这条路径：
+ *
+ * 1. 打开某家已有封面的店 → `photoPaths = [原封面]`；
+ * 2. 从相册导入新图 → 旧封面文件在导入的**那一刻**被删除；
+ * 3. 用户按返回放弃编辑 → 数据库仍指向原封面，但文件已经没了。
+ *
+ * 结果：列表和详情页的封面变成空白，且无法恢复。因此必须显式排除仍在被引用的路径：
+ *
+ * - [originalCoverPath] —— 数据库当前的封面，取消编辑后界面还要用它；
+ * - [recordPhotoPaths] —— 本店用餐记录的照片，删除会破坏那条记录
+ *   （用户可能正是把其中一张设成了封面）；
+ * - [keep] —— 本次新选中、当然要保留的那张。
+ *
+ * 抽成纯函数是为了能被单元测试直接覆盖：这是本项目最容易造成数据丢失的一处逻辑。
+ */
+internal fun reclaimableFormPhotos(
+    formPhotoPaths: List<String>,
+    originalCoverPath: String,
+    recordPhotoPaths: Collection<String>,
+    keep: String,
+): List<String> {
+    val protectedPaths = recordPhotoPaths.toSet() + originalCoverPath + keep
+    return formPhotoPaths.filterNot(protectedPaths::contains)
+}
+
+/**
  * 编辑餐厅表单状态。
  *
  * 与新建表单的关键差异：本页**已有落库数据**，因此多出 [isLoading]（首次填充）与
@@ -28,6 +59,12 @@ import javax.inject.Inject
  *
  * [originalCoverPath] 保存进入页面时数据库中的封面路径，用于判断用户是否真的换过图：
  * 只有换过才需要回收旧文件，否则会把用户刚保留的那张删掉。
+ *
+ * [recordPhotoPaths] 是本店全部用餐照片的路径。它有两个用途：
+ * 1. 作为「从用餐照片选封面」的候选列表；
+ * 2. **保护这些文件不被误删** —— 用户可能把某张用餐照片设成封面，
+ *    此后取消编辑时若把它当成「新导入的图」回收，那条用餐记录的照片就没了。
+ *    因此 [onCleared] 的回收集合必须同时排除 [originalCoverPath] 与 [recordPhotoPaths]。
  */
 data class EditRestaurantUiState(
     val isLoading: Boolean = true,
@@ -37,6 +74,8 @@ data class EditRestaurantUiState(
     val status: com.fanji.mealnote.data.local.RestaurantStatus? = null,
     val photoPaths: List<String> = emptyList(),
     val originalCoverPath: String = "",
+    /** 本店全部用餐照片，按「最近吃的在前」排序。 */
+    val recordPhotoPaths: List<String> = emptyList(),
     val isImportingPhotos: Boolean = false,
     val isSaving: Boolean = false,
     val showNameError: Boolean = false,
@@ -105,6 +144,8 @@ class EditRestaurantViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = false, notFound = true) }
             return
         }
+        // 用餐照片属于数据库侧信息，不是用户输入，因此无论是否从进程重建恢复都要加载。
+        val recordPhotos = repository.getPhotoPathsForRestaurant(id)
         val restored = savedStateHandle.contains(KEY_NAME)
         _uiState.update { state ->
             if (restored) {
@@ -113,6 +154,7 @@ class EditRestaurantViewModel @Inject constructor(
                     isLoading = false,
                     status = restaurant.status,
                     originalCoverPath = restaurant.recommendationPhotoPath,
+                    recordPhotoPaths = recordPhotos,
                 )
             } else {
                 state.copy(
@@ -121,6 +163,7 @@ class EditRestaurantViewModel @Inject constructor(
                     address = restaurant.address,
                     status = restaurant.status,
                     originalCoverPath = restaurant.recommendationPhotoPath,
+                    recordPhotoPaths = recordPhotos,
                     photoPaths = restaurant.recommendationPhotoPath
                         .takeIf(String::isNotBlank)
                         ?.let(::listOf)
@@ -136,40 +179,91 @@ class EditRestaurantViewModel @Inject constructor(
     fun onAddressChange(value: String) =
         _uiState.update { it.copy(address = value, errorMessage = null) }
 
-    /** 导入新封面；替换旧图时立即回收上一张，避免用户反复更换后残留无用图片。 */
+    /**
+     * 导入新封面；替换时回收上一张，但**只回收本次导入的**。
+     *
+     * 上一张若是数据库当前的封面或某条用餐记录的照片，必须保留 ——
+     * 用户可能随后取消编辑，那时界面还要靠这些文件。详见 [reclaimableFormPhotos]。
+     */
     fun onPhotosPicked(uris: List<Uri>) {
         if (uris.isEmpty()) return
         viewModelScope.launch {
             _uiState.update { it.copy(isImportingPhotos = true, errorMessage = null) }
             val imported = photoStore.importUris(uris.take(1))
             val newCover = imported.lastOrNull()
+            val obsolete = if (newCover == null) {
+                emptyList()
+            } else {
+                reclaimableFormPhotos(
+                    formPhotoPaths = _uiState.value.photoPaths,
+                    originalCoverPath = _uiState.value.originalCoverPath,
+                    recordPhotoPaths = _uiState.value.recordPhotoPaths,
+                    keep = newCover,
+                )
+            }
             _uiState.update { state ->
                 if (newCover == null) {
                     state.copy(isImportingPhotos = false, errorMessage = IMPORT_FAILED)
                 } else {
-                    val obsolete = state.photoPaths.filterNot { it == newCover }
                     state.copy(
                         photoPaths = listOf(newCover),
                         isImportingPhotos = false,
                         errorMessage = null,
-                    ).also { photoStore.deleteOwnedPhotos(obsolete) }
+                    )
                 }
             }
+            // 状态更新之后再删除文件：先提交状态，避免删除失败时界面与磁盘不一致。
+            if (obsolete.isNotEmpty()) photoStore.deleteOwnedPhotos(obsolete)
         }
     }
 
     fun createCameraTarget(): Pair<File, Uri> = photoStore.createCameraTarget()
 
+    /** 拍摄成功：新图成为封面，回收范围同样受 [reclaimableFormPhotos] 约束。 */
     fun onCameraPhoto(file: File) {
-        val previous = _uiState.value.photoPaths
+        val state = _uiState.value
+        val obsolete = reclaimableFormPhotos(
+            formPhotoPaths = state.photoPaths,
+            originalCoverPath = state.originalCoverPath,
+            recordPhotoPaths = state.recordPhotoPaths,
+            keep = file.absolutePath,
+        )
         _uiState.update { it.copy(photoPaths = listOf(file.absolutePath), errorMessage = null) }
-        viewModelScope.launch {
-            photoStore.deleteOwnedPhotos(previous.filterNot { it == file.absolutePath })
+        if (obsolete.isNotEmpty()) {
+            viewModelScope.launch { photoStore.deleteOwnedPhotos(obsolete) }
         }
     }
 
     fun onCameraCancelled(file: File) {
         viewModelScope.launch { photoStore.deleteOwnedPhoto(file.absolutePath) }
+    }
+
+    /**
+     * 把某张用餐照片设为封面。
+     *
+     * 这是**文件别名**的来源：设置后 `restaurants.recommendationPhotoPath` 与
+     * `photos.filePath` 指向同一个文件。因此：
+     * - 被替换掉的「新导入」图片可以立即回收（它没有被任何行引用）；
+     * - 但 [EditRestaurantUiState.originalCoverPath] 与 [EditRestaurantUiState.recordPhotoPaths]
+     *   里的路径绝不能在这里删除，它们仍被数据库引用。
+     *
+     * @param path 必须来自 [EditRestaurantUiState.recordPhotoPaths]，否则不做任何修改。
+     */
+    fun useRecordPhotoAsCover(path: String) {
+        val state = _uiState.value
+        if (path !in state.recordPhotoPaths) return
+
+        val obsolete = reclaimableFormPhotos(
+            formPhotoPaths = state.photoPaths,
+            originalCoverPath = state.originalCoverPath,
+            recordPhotoPaths = state.recordPhotoPaths,
+            keep = path,
+        )
+
+        _uiState.update { it.copy(photoPaths = listOf(path), errorMessage = null) }
+        if (obsolete.isNotEmpty()) {
+            viewModelScope.launch { photoStore.deleteOwnedPhotos(obsolete) }
+        }
     }
 
     /**
@@ -230,15 +324,23 @@ class EditRestaurantViewModel @Inject constructor(
     /**
      * 页面销毁时回收“新导入但未保存”的图片。
      *
-     * 三种必须跳过清理的情况：
+     * 四种必须跳过清理的情况：
      * 1. 已保存成功 —— 文件已被数据库引用；
      * 2. 进程重建 —— 照片仍属于用户正在编辑的表单；
-     * 3. 该路径本就是数据库中的封面 —— 删除会破坏已保存的数据。
+     * 3. 该路径本就是数据库中的封面（[EditRestaurantUiState.originalCoverPath]）；
+     * 4. 该路径是本店某条用餐记录的照片（[EditRestaurantUiState.recordPhotoPaths]）——
+     *    用户可能把它选成了封面，但那个文件同时也属于一条用餐记录，删掉就破坏了那条记录。
      */
     override fun onCleared() {
         val state = _uiState.value
         if (!state.saved && !wasRestoredFromSavedState()) {
-            photoStore.deleteOwnedPhotos(state.photoPaths.filterNot { it == state.originalCoverPath })
+            val reclaimable = reclaimableFormPhotos(
+                formPhotoPaths = state.photoPaths,
+                originalCoverPath = state.originalCoverPath,
+                recordPhotoPaths = state.recordPhotoPaths,
+                keep = "",
+            )
+            photoStore.deleteOwnedPhotos(reclaimable)
         }
         super.onCleared()
     }

@@ -96,12 +96,19 @@ interface MealDao {
     @Query("SELECT * FROM photos WHERE diningRecordId = :diningRecordId")
     suspend fun getPhotosForRecord(diningRecordId: Long): List<PhotoEntity>
 
-    /** 读取某餐厅全部用餐记录下的照片路径，用于删除餐厅时回收文件。 */
+    /**
+     * 读取某餐厅全部用餐记录下的照片路径。
+     *
+     * 两个用途：删除餐厅时回收文件；编辑餐厅时提供「从用餐照片选封面」的候选。
+     * 按用餐时间倒序、组内按 `sortOrder` 升序 —— 最近吃的那几张排在最前面，
+     * 正是用户最可能拿来当封面的。
+     */
     @Query(
         """
         SELECT p.filePath FROM photos p
         INNER JOIN dining_records d ON p.diningRecordId = d.id
         WHERE d.restaurantId = :restaurantId
+        ORDER BY d.eatenAt DESC, p.sortOrder ASC
         """
     )
     suspend fun getPhotoPathsForRestaurant(restaurantId: Long): List<String>

@@ -37,10 +37,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fanji.mealnote.data.settings.ThemeMode
 import com.fanji.mealnote.ui.components.ConfirmDialog
 import com.fanji.mealnote.ui.components.MessageBanner
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixListRow
+import com.fanji.mealnote.ui.components.MiuixSegmented
 import com.fanji.mealnote.ui.components.SectionHeader
 import com.fanji.mealnote.ui.formatStorageSize
 import kotlinx.coroutines.delay
@@ -59,6 +61,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
 
     // 导出：CreateDocument 让用户自选保存位置，返回的 URI 由 SAF 授予写权限，
     // 因此无需申请任何存储权限。
@@ -105,6 +108,27 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        SectionHeader(
+                            title = "外观",
+                            subtitle = "深色模式默认跟随系统",
+                        )
+                        MiuixCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            elevation = 2.dp,
+                            contentPadding = PaddingValues(14.dp),
+                        ) {
+                            MiuixSegmented(
+                                options = ThemeMode.entries.toList(),
+                                selected = themeMode,
+                                onSelect = viewModel::setThemeMode,
+                                label = { it.label() },
+                            )
+                        }
                     }
                 }
 
@@ -300,8 +324,20 @@ private fun RowDivider() {
     )
 }
 
+/**
+ * 主题模式的中文文案。
+ *
+ * 「跟随系统」不用「自动」：后者会让人以为是「根据时间自动切换深色」，
+ * 而实际含义是「与系统设置保持一致」。
+ */
+private fun ThemeMode.label(): String = when (this) {
+    ThemeMode.SYSTEM -> "跟随系统"
+    ThemeMode.LIGHT -> "浅色"
+    ThemeMode.DARK -> "深色"
+}
+
 /** 与 `BuildConfig` 保持一致的应用版本；集中在此便于随版本号一起更新。 */
-private const val APP_VERSION = "0.3.2"
+private const val APP_VERSION = "0.3.3"
 
 /** 与 `BackupFormat.FORMAT_VERSION` 保持一致，用于在界面上告知用户备份格式世代。 */
 private const val BACKUP_FORMAT_VERSION = 1

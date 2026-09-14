@@ -73,6 +73,14 @@ class MealRepository @Inject constructor(
      */
     suspend fun getRestaurant(id: Long): RestaurantEntity? = mealDao.getRestaurant(id)
 
+    /**
+     * 读取某餐厅全部用餐照片的路径，供「从用餐照片选封面」使用。
+     *
+     * 返回的顺序为「最近吃的在前、组内按 sortOrder」，与用户挑封面的直觉一致。
+     */
+    suspend fun getPhotoPathsForRestaurant(restaurantId: Long): List<String> =
+        mealDao.getPhotoPathsForRestaurant(restaurantId)
+
     /** 一次性读取某条用餐记录及其照片，供编辑表单初始化使用。 */
     suspend fun getDiningRecord(recordId: Long): DiningRecordWithPhotos? {
         val record = mealDao.getDiningRecord(recordId) ?: return null
@@ -131,7 +139,9 @@ class MealRepository @Inject constructor(
             is MealResult.Success -> {
                 val old = previousCover.value
                 if (old.isNotBlank() && old != restaurant.recommendationPhotoPath) {
-                    photoStore.deleteOwnedPhoto(old)
+                    // 旧封面可能同时是某条用餐记录的照片（用户把它设成了封面），
+                    // 由守卫决定是否真的删除。
+                    deleteUnreferencedFiles(listOf(old))
                 }
                 MealResult.Success(Unit)
             }
@@ -194,7 +204,7 @@ class MealRepository @Inject constructor(
             is MealResult.Success -> {
                 val (recordId, stalePhotos) = outcome.value
                 // 事务已提交：此时回收用户在表单中替换掉的图片不会破坏一致性。
-                photoStore.deleteOwnedPhotos(stalePhotos.filterNot(acceptedPhotos::contains))
+                deleteUnreferencedFiles(stalePhotos.filterNot(acceptedPhotos::contains))
                 MealResult.Success(recordId)
             }
         }
@@ -263,7 +273,7 @@ class MealRepository @Inject constructor(
             is MealResult.Success -> {
                 val (stalePhotos, pendingPhotos) = outcome.value
                 // 事务已提交：此时回收用户替换掉的图片不会破坏一致性。
-                photoStore.deleteOwnedPhotos(stalePhotos + pendingPhotos.filterNot(acceptedPhotos::contains))
+                deleteUnreferencedFiles(stalePhotos + pendingPhotos.filterNot(acceptedPhotos::contains))
                 MealResult.Success(Unit)
             }
         }
@@ -286,7 +296,8 @@ class MealRepository @Inject constructor(
             paths
         }
         // 事务提交后再回收文件；此时记录已不存在，删除失败也只会留下可被扫描回收的孤儿文件。
-        photoStore.deleteOwnedPhotos(photoPaths)
+        // 若某张照片同时被店铺封面引用，守卫会保留它。
+        deleteUnreferencedFiles(photoPaths)
         Unit
     }
 
@@ -304,7 +315,7 @@ class MealRepository @Inject constructor(
             mealDao.deleteRestaurant(restaurant)
             recordFiles + restaurant.recommendationPhotoPath
         }
-        photoStore.deleteOwnedPhotos(ownedFiles.filter(String::isNotBlank))
+        deleteUnreferencedFiles(ownedFiles)
         Unit
     }
 
@@ -392,7 +403,8 @@ class MealRepository @Inject constructor(
             }
         }
         // 事务已提交：此时回收被替换掉的旧文件不会破坏一致性。
-        photoStore.deleteOwnedPhotos(obsoleteFiles.filter(String::isNotBlank))
+        // 守卫会跳过任何仍被新数据引用的路径（正常情况下不会发生，作为兜底）。
+        deleteUnreferencedFiles(obsoleteFiles)
         Unit
     }
 
@@ -439,6 +451,38 @@ class MealRepository @Inject constructor(
 
     /** 原子地取出指定表单的待回收图片；供事务提交后清理使用。 */
     private fun takePendingPhotos(formKey: Long): List<String> = releasePendingPhotos(formKey)
+
+    /**
+     * 回收磁盘文件，**跳过仍被任何数据库行引用的路径**。
+     *
+     * ## 为什么需要这层守卫
+     *
+     * 早期版本假定「一个文件只被一处引用」：封面只被 `restaurants.recommendationPhotoPath`
+     * 引用，用餐照片只被 `photos.filePath` 引用。但「把某张用餐照片设为封面」这个功能
+     * 会让同一个文件同时被两处引用，此后所有删除路径都会误删另一处仍在用的文件：
+     *
+     * - 换封面时删掉旧封面 → 那条用餐记录的照片没了；
+     * - 删用餐记录时删掉它的照片 → 店铺封面没了；
+     * - 取消编辑时回收「非原始封面」的图 → 用餐照片没了。
+     *
+     * 与其在三处分别打补丁（漏一处就是数据丢失），不如把不变式统一为
+     * **「磁盘文件只在没有任何数据库行引用它时才允许删除」**，让所有删除路径都走这里。
+     *
+     * 代价是每次删除都要读一次全表路径集合。对本应用的数据量（个人使用，数百张图）
+     * 可以忽略；若将来数据量显著增长，再改成按路径精确查询。
+     *
+     * 必须在**事务提交之后**调用：在事务内查询引用集合会读到未提交的中间状态。
+     */
+    private suspend fun deleteUnreferencedFiles(paths: Collection<String>) {
+        val candidates = paths.filter(String::isNotBlank).distinct()
+        if (candidates.isEmpty()) return
+        val referenced = buildSet {
+            addAll(mealDao.getAllPhotoPaths())
+            addAll(mealDao.getRestaurantCoverPaths())
+        }
+        val deletable = candidates.filterNot(referenced::contains)
+        if (deletable.isNotEmpty()) photoStore.deleteOwnedPhotos(deletable)
+    }
 
     /**
      * 自由文本字段的入库规范化：去首尾空白 + 截断到 [limit]。

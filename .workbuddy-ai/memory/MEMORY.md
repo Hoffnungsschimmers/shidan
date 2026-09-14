@@ -89,11 +89,11 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 
 ## 当前版本与交付
 
-- **v0.3.2**（versionCode 5）。花费字段、MIUIx 视觉重做、底部导航与信息架构重排、
-  玻璃材质、全屏照片查看器、统计页均已完成。
-- 交付物在 `安装包/`：`味笺-v0.3.2-release.apk`（已签名，2,045,675 B，
-  sha256 `758b66820cab542c0636d41401f9ed8684b6fddaafb6dc85d4b8eb39fc98e7cb`）、
-  `味笺-v0.3.2-debug.apk`（18,851,009 B）。
+- **v0.3.3**（versionCode 6）。花费字段、MIUIx 视觉重做、信息架构重排、玻璃材质、
+  照片查看器、统计页、封面复用、深色模式切换均已完成。
+- 交付物在 `安装包/`：`味笺-v0.3.3-release.apk`（已签名，2,045,675 B，
+  sha256 `9202902d63704408997336e1c4fa85c86541381d93b66829cfd27dbfc40dd519`）、
+  `味笺-v0.3.3-debug.apk`（18,942,935 B）。
 - 签名密钥库 `mealnote-release.jks`（项目根目录），凭据在 `local.properties`。
   `.gitignore` 已排除 `*.jks` / `local.properties` / `*.apk`。
   **密钥库是单点故障**：丢失后已安装用户无法覆盖升级。
@@ -109,21 +109,31 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 - **提交前必须确认 `local.properties` 与 `mealnote-release.jks` 未被纳入**
   （前者含签名口令），用 `git ls-files --error-unmatch <file>` 逐个验证。
 
+## 文件生命周期（数据安全的核心不变式）
+
+**磁盘文件只在没有任何数据库行引用它时才允许删除。**
+仓库内所有删除都走 `MealRepository.deleteUnreferencedFiles()`。
+一个文件可能同时被 `restaurants.recommendationPhotoPath`（封面）与
+`photos.filePath`（用餐照片）引用 —— 用户可以把某张用餐照片设成封面。
+
+**编辑表单回收图片时，只回收「本次导入、且当前未被选中」的那些**，统一走
+`reclaimableFormPhotos(formPhotoPaths, originalCoverPath, recordPhotoPaths, keep)`。
+表单首次加载时 `photoPaths` 就是数据库当前的封面，无条件删「上一张」会在导入新图的
+瞬间删掉仍在使用的文件（v0.3.3 修复的正是这个自 v0.2.0 起就存在的 bug）。
+已有 9 个单元测试覆盖（`ReclaimableFormPhotosTest`）。
+
 ## 明确评估后放弃的功能（不要贸然加回）
 
-**从用餐照片设置封面**。它会让 `restaurants.recommendationPhotoPath` 与
-`photos.filePath` 指向同一文件，而现有所有删除路径都会因此破坏另一处引用的数据：
-`updateRestaurant` 换封面删旧图、`deleteDiningRecord` 删记录照片、
-`EditRestaurantViewModel.onCleared` 取消编辑删非原始封面。
-
-要支持它必须先把全局不变式改成「**磁盘文件只在没有任何数据库行引用时才允许删除**」，
-并让所有删除路径统一走带引用的守卫。这是一次涉及数据安全的仓库层重构，
-必须独立进行并配套测试。
+（暂无。原先列为「放弃」的「从用餐照片设置封面」已在 v0.3.3 完成 ——
+前置的引用守卫重构已做完，见上节。）
 
 ## 其他
 
 - 文档：`README.md`（构建与环境）、`DESIGN_SYSTEM.md`（设计规范）、
   `CHANGELOG.md`（变更）、`PROJECT_PLAN.md`（路线图）、`HANDOFF.md`（交接）。
-- 未做（V0.3 剩余候选）：封面设置与排序、统计与年度回顾、分享卡片、
-  深色模式手动切换、无障碍细化；`AppDatabaseMigrationTest` 仪器化测试从未运行
+- 新增设置项优先用平台自带的 `SharedPreferences`（见 `data/settings/ThemePreference.kt`）：
+  项目锁定依赖版本，为单个设置项引入 DataStore 不划算。写入用 core-ktx 的
+  `preferences.edit { }`（默认 apply），否则 Lint 会报 `UseKtx`。
+- 未做（V0.3 剩余候选）：分享卡片（把一次用餐生成图片分享）、
+  统计的年度回顾视图、无障碍细化；`AppDatabaseMigrationTest` 仪器化测试从未运行
   （需真机/模拟器；本机改用内存 SQLite 做了迁移等价性验证，见当日日志）。

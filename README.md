@@ -135,7 +135,7 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 
 | 检查项 | 状态 |
 |---|---|
-| `testDebugUnitTest` | 44 个用例全部通过（经 JDK 直接运行验证，见上方环境问题说明） |
+| `testDebugUnitTest` | 53 个用例全部通过（经 JDK 直接运行验证，见上方环境问题说明） |
 | `lintDebug` | 通过（0 错误） |
 | `assembleDebug` | 通过 |
 | `assembleRelease` | 通过（R8 混淆 + 资源裁剪，已签名） |
@@ -181,6 +181,11 @@ ui/components/  Miuix.kt（通用组件）、Motion.kt（动效）、Glass.kt（
 
 - 可预期的业务失败通过 `MealResult` / `MealError` 返回，不使用异常或“假成功”表达；
 - 涉及数据的操作先提交事务、再删除磁盘文件，保证失败时数据一致；
+- **磁盘文件只在没有任何数据库行引用它时才允许删除**。仓库内所有删除都经过
+  `MealRepository.deleteUnreferencedFiles()`：一个文件可能同时被店铺封面与用餐记录引用
+  （用户把某张用餐照片设成了封面），逐处打补丁漏一处就是数据丢失；
+- 编辑表单回收图片时，只回收「本次导入、且当前未被选中」的那些，
+  原封面与用餐照片无论何时都保留（见 `reclaimableFormPhotos()`）；
 - `RestaurantEntity` / `DiningRecordEntity` 中被标记 `@Deprecated` 的字段是维持数据库
   schema 的历史列，新增代码不得读写；
 - 备份包使用独立的 JSON 格式，不复用数据库实体，避免历史遗留列进入备份文件；

@@ -3,6 +3,9 @@ package com.fanji.mealnote.ui.edit
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,16 +17,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,9 +40,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
 import com.fanji.mealnote.ui.components.CameraPhotoAction
 import com.fanji.mealnote.ui.components.GalleryPhotoAction
 import com.fanji.mealnote.ui.components.MiuixButton
@@ -47,6 +57,55 @@ import com.fanji.mealnote.ui.components.SectionHeader
 import com.fanji.mealnote.ui.components.SelectedPhoto
 import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import java.io.File
+
+/**
+ * 「从用餐照片选封面」的候选项。
+ *
+ * 选中态用**主色描边 + 右上角勾选**双重表达，不只依赖颜色 ——
+ * 与评价徽章、状态徽章遵守同一条无障碍约定。
+ */
+@Composable
+private fun CoverCandidate(path: String, selected: Boolean, onClick: () -> Unit) {
+    val shape = MaterialTheme.shapes.medium
+    Box(
+        modifier = Modifier
+            .size(92.dp)
+            .clip(shape)
+            .clickable(onClick = onClick),
+    ) {
+        AsyncImage(
+            model = File(path),
+            contentDescription = if (selected) "当前封面" else "设为封面",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)),
+            )
+            Surface(
+                modifier = Modifier.align(Alignment.TopEnd).padding(5.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+            ) {
+                Icon(
+                    Icons.Rounded.Check,
+                    contentDescription = null,
+                    modifier = Modifier.padding(3.dp).size(14.dp),
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape),
+            )
+        }
+    }
+}
 
 /** 编辑餐厅资料。布局与新建页保持一致，差异只在于进入时已有数据、以及按钮文案。 */
 @Composable
@@ -163,6 +222,31 @@ fun EditRestaurantScreen(
                                         onRemove = { viewModel.removePhoto(index) },
                                         onPreview = { photoViewer.open(uiState.photoPaths, index) },
                                     )
+                                }
+                            }
+                        }
+                    }
+
+                    // 「从用餐照片里选」：照片已经在应用里了，不该逼用户再导入一次。
+                    // 只在本店确实有用餐照片时出现，否则整段是空的。
+                    if (uiState.recordPhotoPaths.isNotEmpty()) {
+                        item {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                SectionHeader(
+                                    title = "或从用餐照片里选",
+                                    subtitle = "用吃过的照片当封面，不用重新导入",
+                                )
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    itemsIndexed(
+                                        items = uiState.recordPhotoPaths,
+                                        key = { _, path -> path },
+                                    ) { _, path ->
+                                        CoverCandidate(
+                                            path = path,
+                                            selected = uiState.photoPaths.firstOrNull() == path,
+                                            onClick = { viewModel.useRecordPhotoAsCover(path) },
+                                        )
+                                    }
                                 }
                             }
                         }

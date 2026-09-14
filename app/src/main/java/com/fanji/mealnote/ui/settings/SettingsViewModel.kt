@@ -7,6 +7,8 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.backup.BackupStore
+import com.fanji.mealnote.data.settings.ThemeMode
+import com.fanji.mealnote.data.settings.ThemePreference
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,9 +44,22 @@ data class SettingsUiState(
 class SettingsViewModel @Inject constructor(
     private val repository: MealRepository,
     private val backupStore: BackupStore,
+    private val themePreference: ThemePreference,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
+
+    /**
+     * 主题模式。
+     *
+     * 直接暴露 [ThemePreference] 的 Flow 而不是复制一份到 [SettingsUiState]：
+     * 主题是全局状态，复制进页面状态会让「两处真相」有机会不一致，
+     * 也会在每次切换时多做一次无意义的状态拷贝。
+     */
+    val themeMode: StateFlow<ThemeMode> = themePreference.mode
+
+    /** 切换主题。写入是同步的，界面会立刻反映，无需等待。 */
+    fun setThemeMode(value: ThemeMode) = themePreference.setMode(value)
 
     init {
         refreshStats()
