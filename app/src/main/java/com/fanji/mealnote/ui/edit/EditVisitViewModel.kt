@@ -72,6 +72,18 @@ class EditVisitViewModel @Inject constructor(
     )
     val uiState: StateFlow<EditVisitUiState> = _uiState.asStateFlow()
 
+    /**
+     * 本实例是否由系统回收后的状态恢复而来。
+     *
+     * **必须在构造时求值，且必须声明在 `init` 之前**（属性初始化按声明顺序执行）：
+     * 下面 `init` 里的持久化逻辑会把这些 key 写回 `savedStateHandle`
+     * （`Dispatchers.Main.immediate` + StateFlow 首帧同步发射，构造期间就会写入），
+     * 之后再判断就**恒为 true** —— 早期版本正是如此，导致
+     * 「放弃表单时回收未提交图片」这段逻辑从未真正执行，图片一直泄漏成孤儿文件。
+     */
+    private val restoredFromSavedState: Boolean =
+        savedStateHandle.contains(KEY_NOTE) || savedStateHandle.contains(KEY_PHOTOS)
+
     init {
         viewModelScope.launch {
             _uiState
@@ -257,14 +269,11 @@ class EditVisitViewModel @Inject constructor(
      */
     override fun onCleared() {
         val state = _uiState.value
-        if (!state.saved && !wasRestoredFromSavedState()) {
+        if (!state.saved && !restoredFromSavedState) {
             photoStore.deleteOwnedPhotos(state.photoPaths.filterNot { it in state.originalPhotoPaths })
         }
         super.onCleared()
     }
-
-    private fun wasRestoredFromSavedState(): Boolean =
-        savedStateHandle.contains(KEY_NOTE) || savedStateHandle.contains(KEY_PHOTOS)
 
     private fun MealError.toSaveMessage(): String = when (this) {
         MealError.RecordNotFound -> "该用餐记录已不存在，请返回后重试"

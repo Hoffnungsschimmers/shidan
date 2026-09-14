@@ -337,7 +337,7 @@ private fun ThemeMode.label(): String = when (this) {
 }
 
 /** 与 `BuildConfig` 保持一致的应用版本；集中在此便于随版本号一起更新。 */
-private const val APP_VERSION = "0.3.5"
+private const val APP_VERSION = "0.3.6"
 
 /** 与 `BackupFormat.FORMAT_VERSION` 保持一致，用于在界面上告知用户备份格式世代。 */
 private const val BACKUP_FORMAT_VERSION = 1

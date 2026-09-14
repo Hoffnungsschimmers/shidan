@@ -76,6 +76,18 @@ class AddVisitViewModel @Inject constructor(
 
     val uiState: StateFlow<AddVisitUiState> = _uiState.asStateFlow()
 
+    /**
+     * 本实例是否由系统回收后的状态恢复而来。
+     *
+     * **必须在构造时求值**，不能写成函数留到 [onCleared] 再算。
+     * 下面 `init` 里的持久化逻辑会把 [KEY_NOTE] / [KEY_PHOTOS] 写回 `savedStateHandle`
+     * （`Dispatchers.Main.immediate` + StateFlow 首帧同步发射，构造期间就会写入），
+     * 之后再判断就**恒为 true** —— 早期版本正是如此，导致
+     * 「放弃表单时回收未提交图片」这段逻辑从未真正执行，图片一直泄漏成孤儿文件。
+     */
+    private val restoredFromSavedState: Boolean =
+        savedStateHandle.contains(KEY_NOTE) || savedStateHandle.contains(KEY_PHOTOS)
+
     init {
         // 只持久化“用户输入”字段，并用 distinctUntilChanged 过滤加载态变化，
         // 避免每次按键都写一次 saved instance state 而拖慢输入响应。
@@ -269,15 +281,11 @@ class AddVisitViewModel @Inject constructor(
      *    且用户再次保存时会写入已失效的路径。
      */
     override fun onCleared() {
-        if (!_uiState.value.saved && !wasRestoredFromSavedState()) {
+        if (!_uiState.value.saved && !restoredFromSavedState) {
             photoStore.deleteOwnedPhotos(_uiState.value.photoPaths)
         }
         super.onCleared()
     }
-
-    /** 判断本实例是否由系统回收后的状态恢复而来。 */
-    private fun wasRestoredFromSavedState(): Boolean =
-        savedStateHandle.contains(KEY_NOTE) || savedStateHandle.contains(KEY_PHOTOS)
 
     private fun MealError.toSaveMessage(): String = when (this) {
         MealError.RestaurantNotFound -> "该餐厅记录已不存在，请返回列表后重试"

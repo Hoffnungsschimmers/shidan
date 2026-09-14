@@ -104,6 +104,17 @@ class EditRestaurantViewModel @Inject constructor(
     )
     val uiState: StateFlow<EditRestaurantUiState> = _uiState.asStateFlow()
 
+    /**
+     * 本实例是否由系统回收后的状态恢复而来。
+     *
+     * **必须在构造时求值，且必须声明在 `init` 之前**（属性初始化按声明顺序执行）：
+     * 下面 `init` 里的持久化逻辑会把这些 key 写回 `savedStateHandle`，
+     * 之后再判断就恒为 true，`onCleared` 里的图片回收会永久失效
+     * （详见 `AddVisitViewModel` 的同名字段）。
+     */
+    private val restoredFromSavedState: Boolean =
+        savedStateHandle.contains(KEY_NAME) || savedStateHandle.contains(KEY_PHOTOS)
+
     init {
         // 持久化职责与新建表单一致：只保存用户可编辑字段，并用 distinctUntilChanged
         // 过滤掉加载态变化，避免每次按键都写一次 saved instance state。
@@ -333,7 +344,7 @@ class EditRestaurantViewModel @Inject constructor(
      */
     override fun onCleared() {
         val state = _uiState.value
-        if (!state.saved && !wasRestoredFromSavedState()) {
+        if (!state.saved && !restoredFromSavedState) {
             val reclaimable = reclaimableFormPhotos(
                 formPhotoPaths = state.photoPaths,
                 originalCoverPath = state.originalCoverPath,
@@ -344,9 +355,6 @@ class EditRestaurantViewModel @Inject constructor(
         }
         super.onCleared()
     }
-
-    private fun wasRestoredFromSavedState(): Boolean =
-        savedStateHandle.contains(KEY_NAME) || savedStateHandle.contains(KEY_PHOTOS)
 
     private fun MealError.toSaveMessage(): String = when (this) {
         MealError.RestaurantNotFound -> "该餐厅记录已不存在，请返回列表后重试"

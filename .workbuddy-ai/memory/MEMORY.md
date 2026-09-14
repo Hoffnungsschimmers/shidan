@@ -89,11 +89,11 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 
 ## 当前版本与交付
 
-- **v0.3.5**（versionCode 8）。花费字段、MIUIx 视觉重做、信息架构重排、玻璃材质、
-  照片查看器、统计页、封面复用、深色模式切换、分享卡片、无障碍细化均已完成。
-- 交付物在 `安装包/`：`味笺-v0.3.5-release.apk`（已签名，2,045,723 B，
-  sha256 `bb6730b1ff61575ed6a908e2202b175dacf4a4565df76897b1bbbd8709f26292`）、
-  `味笺-v0.3.5-debug.apk`（18,883,829 B）。
+- **v0.3.6**（versionCode 9）。功能已齐（花费、MIUIx 视觉、信息架构、玻璃、照片查看器、
+  统计、封面复用、深色模式、分享卡片、无障碍细化）。
+- 交付物在 `安装包/`：`味笺-v0.3.6-release.apk`（已签名，2,045,723 B，
+  sha256 `a30e75ae8276184987c02503e1933795f42500b706420e46e364e921f5c3bb43`）、
+  `味笺-v0.3.6-debug.apk`（18,883,825 B）。
 - 签名密钥库 `mealnote-release.jks`（项目根目录），凭据在 `local.properties`。
   `.gitignore` 已排除 `*.jks` / `local.properties` / `*.apk`。
   **密钥库是单点故障**：丢失后已安装用户无法覆盖升级。
@@ -121,6 +121,19 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 表单首次加载时 `photoPaths` 就是数据库当前的封面，无条件删「上一张」会在导入新图的
 瞬间删掉仍在使用的文件（v0.3.3 修复的正是这个自 v0.2.0 起就存在的 bug）。
 已有 9 个单元测试覆盖（`ReclaimableFormPhotosTest`）。
+
+**`restoredFromSavedState` 必须在构造时求值，且声明在 `init` 之前。**
+四个表单 ViewModel 都用它决定 `onCleared` 是否回收图片。写成函数留到 `onCleared`
+再算会**恒为 true** —— 因为 `init` 里的持久化收集器（`Dispatchers.Main.immediate`
++ StateFlow 首帧同步发射）在**构造期间**就把那些 key 写回了 `savedStateHandle`，
+导致清理逻辑静默失效（v0.3.6 修复）。
+
+## 审计「删除」相关代码的例行要求
+
+删除路径**不会自己暴露问题**：没有报错、没有用户可见异常，只是逻辑静默失效。
+v0.3.3 的换封面误删、v0.3.6 的回收失效，都是靠主动重读删除代码发现的。
+每次大改之后，把 `onCleared` / `deleteXxx` / `updateXxx` 里所有涉及文件删除的
+分支重读一遍。
 
 ## 无障碍硬约定（改 UI 时必须遵守）
 

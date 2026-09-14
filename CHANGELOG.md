@@ -2,6 +2,61 @@
 
 本项目遵循语义化版本思路记录主要变更。
 
+## 0.3.6
+
+### 修复：「放弃表单时回收未提交图片」从未真正执行（4 个表单页）
+
+四个表单 ViewModel（新建/编辑店铺、新建/编辑用餐记录）都用同一个判断决定
+销毁时是否回收图片：
+
+```kotlin
+override fun onCleared() {
+    if (!saved && !wasRestoredFromSavedState()) { photoStore.deleteOwnedPhotos(photoPaths) }
+}
+private fun wasRestoredFromSavedState() =
+    savedStateHandle.contains(KEY_NOTE) || savedStateHandle.contains(KEY_PHOTOS)
+```
+
+问题在于**判断的时机**。同一个类里的持久化逻辑会把 `KEY_NOTE` / `KEY_PHOTOS`
+写回 `savedStateHandle`，而它是这样启动的：
+
+```kotlin
+init {
+    viewModelScope.launch {
+        _uiState.map { ... }.distinctUntilChanged().collect { savedStateHandle[...] = ... }
+    }
+}
+```
+
+`viewModelScope` 用的是 `Dispatchers.Main.immediate`，且 StateFlow 的首帧是**同步发射**的
+—— 也就是说这些 key 在**构造期间**就被写入了。等到 `onCleared` 再判断，`contains`
+**恒为 true**，条件永远不成立。
+
+后果：用户导入图片后放弃表单，图片文件不会被回收，而是变成孤儿文件，
+要等下次手动「清理无用文件」时才被扫掉（且需满足 10 分钟的存活门槛）。
+
+修复方式是在**构造时**求值，并确保声明位置在 `init` 之前
+（Kotlin 属性初始化按声明顺序执行）：
+
+```kotlin
+// 必须在 init 之前 —— 否则 init 里的持久化逻辑会先污染 savedStateHandle
+private val restoredFromSavedState: Boolean =
+    savedStateHandle.contains(KEY_NOTE) || savedStateHandle.contains(KEY_PHOTOS)
+```
+
+> 这类 bug 的特点是**没有任何报错、没有用户可见的异常**，只是清理逻辑静默失效。
+> 靠读代码发现，靠测试很难覆盖（需要构造时序 + 协程调度器配合）。
+
+### 验证
+
+```
+单元测试 ：53 个用例全部通过
+Lint     ：0 错误、0 告警
+构建     ：assembleDebug / assembleRelease 全部 SUCCESS
+签名     ：apksigner verify 通过（v2 方案）
+数据库   ：version 3（本版未改动 schema）
+```
+
 ## 0.3.5
 
 无障碍细化。这一版没有新功能，修的都是「视觉上有、非视觉用户拿不到」的信息缺失。
