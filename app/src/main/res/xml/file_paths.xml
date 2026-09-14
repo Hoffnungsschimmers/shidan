@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- 应用私有照片目录：相机拍摄目标与全部用餐照片 -->
     <files-path
         name="photos"
         path="photos/" />
+
+    <!--
+      分享卡片：渲染出的图片先写到 cacheDir/shared/ 再通过 FileProvider 授权给
+      目标应用读取。放在 cache 而非 files 是因为它是一次性的中间产物，
+      系统在存储紧张时可以自行回收，不需要应用自己维护清理策略。
+    -->
+    <cache-path
+        name="shared"
+        path="shared/" />
 </paths>

@@ -1,5 +1,7 @@
 package com.fanji.mealnote.ui.detail
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Restaurant
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -51,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -68,6 +72,8 @@ import com.fanji.mealnote.ui.components.MiuixIconButton
 import com.fanji.mealnote.ui.components.PhotoPlaceholder
 import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.SectionHeader
+import com.fanji.mealnote.ui.components.ShareCardData
+import com.fanji.mealnote.ui.components.ShareCardSheet
 import com.fanji.mealnote.ui.components.StatusBadge
 import com.fanji.mealnote.ui.components.VerdictBadge
 import com.fanji.mealnote.ui.components.glassBackdropSource
@@ -106,6 +112,16 @@ fun RestaurantDetailScreen(
     val backdrop = rememberGlassBackdrop()
     val listState = rememberLazyListState()
     val photoViewer = rememberPhotoViewerState()
+    val context = LocalContext.current
+    var shareTarget by remember { mutableStateOf<ShareCardData?>(null) }
+    val pendingShareUri by viewModel.pendingShareUri.collectAsStateWithLifecycle()
+
+    // 分享图片写好后发起系统分享。必须消费掉 URI，否则返回本页会重复弹出分享面板。
+    LaunchedEffect(pendingShareUri) {
+        val uri = pendingShareUri ?: return@LaunchedEffect
+        context.startActivity(buildShareIntent(uri))
+        viewModel.consumeShareUri()
+    }
 
     LaunchedEffect(restaurantId) { viewModel.setRestaurantId(restaurantId) }
     LaunchedEffect(uiState.deletionCompleted) {
@@ -188,6 +204,22 @@ fun RestaurantDetailScreen(
                                 recordWithPhotos = recordWithPhotos,
                                 onEdit = { onEditVisit(recordWithPhotos.record.id) },
                                 onDelete = { viewModel.requestDeleteRecord(recordWithPhotos.record.id) },
+                                onShare = {
+                                    shareTarget = ShareCardData(
+                                        restaurantName = detail.restaurant.name,
+                                        address = detail.restaurant.address,
+                                        eatenAt = recordWithPhotos.record.eatenAt,
+                                        verdict = recordWithPhotos.record.verdict,
+                                        dishes = recordWithPhotos.record.dishes,
+                                        priceText = recordWithPhotos.record.priceText,
+                                        note = recordWithPhotos.record.note,
+                                        // 用第一张照片当卡片主图：它是用户自己排的顺序。
+                                        photoPath = recordWithPhotos.photos
+                                            .sortedBy { it.sortOrder }
+                                            .firstOrNull()
+                                            ?.filePath,
+                                    )
+                                },
                                 onPhotoClick = { index ->
                                     photoViewer.open(
                                         recordWithPhotos.photos.sortedBy { it.sortOrder }.map { it.filePath },
@@ -309,7 +341,40 @@ fun RestaurantDetailScreen(
             onDismiss = viewModel::cancelDeleteRestaurant,
         )
     }
+
+    shareTarget?.let { data ->
+        ShareCardSheet(
+            data = data,
+            onShare = { bitmap ->
+                viewModel.shareCard(bitmap)
+                shareTarget = null
+            },
+            onDismiss = { shareTarget = null },
+        )
+    }
 }
+
+/**
+ * 构造系统分享 Intent。
+ *
+ * 三点缺一不可：
+ * - `ACTION_SEND` + `type = "image/png"` 才会被识别为分享图片；
+ * - `EXTRA_STREAM` 携带图片 URI；
+ * - `FLAG_GRANT_READ_URI_PERMISSION` 临时把该 URI 的读权限授给接收方 ——
+ *   没有它，对方拿到 URI 也读不出内容。
+ *
+ * 用 `createChooser` 而不是直接 `ACTION_SEND`：后者在有多个可接收应用时
+ * 会弹出一个不完整的列表，chooser 能给出完整的应用选择界面。
+ */
+private fun buildShareIntent(uri: Uri): Intent =
+    Intent.createChooser(
+        Intent(Intent.ACTION_SEND).apply {
+            type = "image/png"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        },
+        "分享到",
+    )
 
 /** 头图 + 压在其上的信息卡。两者放在同一个 item 里，才能形成真正的叠压而非留白。 */
 @Composable
@@ -454,6 +519,7 @@ private fun VisitCard(
     recordWithPhotos: DiningRecordWithPhotos,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onShare: () -> Unit,
     onPhotoClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -537,6 +603,12 @@ private fun VisitCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Spacer(Modifier.weight(1f))
+            MiuixIconButton(
+                icon = Icons.Rounded.Share,
+                contentDescription = "生成分享卡片",
+                onClick = onShare,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             MiuixIconButton(
                 icon = Icons.Rounded.Edit,
                 contentDescription = "编辑这条记录",

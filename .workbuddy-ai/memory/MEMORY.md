@@ -89,11 +89,11 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 
 ## 当前版本与交付
 
-- **v0.3.3**（versionCode 6）。花费字段、MIUIx 视觉重做、信息架构重排、玻璃材质、
-  照片查看器、统计页、封面复用、深色模式切换均已完成。
-- 交付物在 `安装包/`：`味笺-v0.3.3-release.apk`（已签名，2,045,675 B，
-  sha256 `9202902d63704408997336e1c4fa85c86541381d93b66829cfd27dbfc40dd519`）、
-  `味笺-v0.3.3-debug.apk`（18,942,935 B）。
+- **v0.3.4**（versionCode 7）。花费字段、MIUIx 视觉重做、信息架构重排、玻璃材质、
+  照片查看器、统计页、封面复用、深色模式切换、分享卡片均已完成。
+- 交付物在 `安装包/`：`味笺-v0.3.4-release.apk`（已签名，2,045,723 B，
+  sha256 `84884074cac946b1cecc00b5d87f56bd313dacd27c05cc0cc342eb9ad065e469`）、
+  `味笺-v0.3.4-debug.apk`（18,883,829 B）。
 - 签名密钥库 `mealnote-release.jks`（项目根目录），凭据在 `local.properties`。
   `.gitignore` 已排除 `*.jks` / `local.properties` / `*.apk`。
   **密钥库是单点故障**：丢失后已安装用户无法覆盖升级。
@@ -134,6 +134,10 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 - 新增设置项优先用平台自带的 `SharedPreferences`（见 `data/settings/ThemePreference.kt`）：
   项目锁定依赖版本，为单个设置项引入 DataStore 不划算。写入用 core-ktx 的
   `preferences.edit { }`（默认 apply），否则 Lint 会报 `UseKtx`。
-- 未做（V0.3 剩余候选）：分享卡片（把一次用餐生成图片分享）、
-  统计的年度回顾视图、无障碍细化；`AppDatabaseMigrationTest` 仪器化测试从未运行
-  （需真机/模拟器；本机改用内存 SQLite 做了迁移等价性验证，见当日日志）。
+- 分享卡片用 `GraphicsLayer` 录制 + `toImageBitmap()`（挂起函数）导出位图，
+  图片写在 `cacheDir/shared/`（**不是** `files/photos/`），
+  `res/xml/file_paths.xml` 同时映射 `files-path` 与 `cache-path`。
+  必须让卡片可见才能录到内容 —— 所以设计成「先预览再分享」。
+- 未做（V0.3 剩余候选）：统计的年度回顾视图、无障碍细化、
+  分享卡片接入足迹时间线（目前只在详情页）；`AppDatabaseMigrationTest`
+  仪器化测试从未运行（需真机/模拟器；本机改用内存 SQLite 做了迁移等价性验证）。

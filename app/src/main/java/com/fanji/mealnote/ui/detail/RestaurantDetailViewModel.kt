@@ -1,16 +1,20 @@
 package com.fanji.mealnote.ui.detail
 
+import android.graphics.Bitmap
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
+import com.fanji.mealnote.data.ShareImageStore
 import com.fanji.mealnote.data.local.RestaurantWithRecords
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -49,11 +53,23 @@ data class RestaurantDetailUiState(
 @HiltViewModel
 class RestaurantDetailViewModel @Inject constructor(
     private val repository: MealRepository,
+    private val shareImageStore: ShareImageStore,
 ) : ViewModel() {
     private val restaurantId = MutableStateFlow<Long?>(null)
 
     /** 与数据库订阅流分离的本地界面状态，避免删除弹窗等瞬时状态被上游发射覆盖。 */
     private val localState = MutableStateFlow(RestaurantDetailUiState(isLoading = true))
+
+    /**
+     * 待分享图片的 content URI。
+     *
+     * 渲染位图必须在界面层完成（Compose 只能录制已经绘制过的内容），
+     * 但写文件与生成 URI 属于数据层职责，因此由界面把位图交回来，
+     * ViewModel 写好之后通过这个流把 URI 交还给界面去发起分享 Intent。
+     * 一次性事件，界面消费后必须调用 [consumeShareUri] 复位。
+     */
+    private val _pendingShareUri = MutableStateFlow<Uri?>(null)
+    val pendingShareUri: StateFlow<Uri?> = _pendingShareUri.asStateFlow()
 
     /**
      * 餐厅详情数据流。
@@ -96,6 +112,32 @@ class RestaurantDetailViewModel @Inject constructor(
     /** 注入路由参数。重复设置同一 id 时跳过，避免重建上游 Flow 造成无谓重查询。 */
     fun setRestaurantId(id: Long) {
         if (restaurantId.value != id) restaurantId.value = id
+    }
+
+    // ------------------------------------------------------------ 分享卡片
+
+    /**
+     * 把界面渲染好的分享卡片写入缓存并交回 content URI。
+     *
+     * 文件名带时间戳：`FileProvider` 的 URI 一旦被接收方持有就会在分享期间保持有效，
+     * 覆盖同名文件会让正在读取的接收方拿到半张图。
+     */
+    fun shareCard(bitmap: Bitmap) {
+        viewModelScope.launch {
+            val fileName = "mealnote-share-${System.currentTimeMillis()}.png"
+            val uri = shareImageStore.writeShareImage(bitmap, fileName)
+            if (uri == null) {
+                localState.update {
+                    it.copy(errorMessage = "生成分享图片失败，请检查存储空间后重试")
+                }
+            } else {
+                _pendingShareUri.value = uri
+            }
+        }
+    }
+
+    fun consumeShareUri() {
+        _pendingShareUri.value = null
     }
 
     /** 请求删除某条用餐记录；界面据此弹出确认对话框。 */
