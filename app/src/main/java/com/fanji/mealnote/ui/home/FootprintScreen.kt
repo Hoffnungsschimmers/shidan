@@ -33,6 +33,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,6 +41,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -219,7 +225,13 @@ private fun OverviewCard(uiState: FootprintUiState) {
 
 @Composable
 private fun StatCell(label: String, value: Int, unit: String, modifier: Modifier = Modifier) {
-    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        modifier = modifier
+            // 数字带滚动动画，屏幕阅读器可能聚焦在动画中途读到错误的中间值。
+            // 直接锁定为最终值播报，同时把标签与单位并进同一句。
+            .clearAndSetSemantics { contentDescription = "$label $value $unit" },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
@@ -320,8 +332,18 @@ private fun MonthlyCard(counts: List<MonthlyCount>) {
 @Composable
 private fun MonthlyBarChart(counts: List<MonthlyCount>) {
     val peak = (counts.maxOfOrNull { it.count } ?: 0).coerceAtLeast(1)
+    // 柱状图对屏幕阅读器完全不可见：结构上全是 Box 与空 Text。
+    // 用一个整体描述替代逐柱朗读 —— 后者既冗长（12 个数字）又难以在脑中还原趋势。
+    val summary = remember(counts) {
+        counts.filter { it.count > 0 }
+            .joinToString("，") { "${it.label} ${it.count} 次" }
+            .ifEmpty { "最近 12 个月没有用餐记录" }
+    }
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            // clearAndSetSemantics 会连同子节点一并清掉，保证只播报这一句汇总。
+            .clearAndSetSemantics { contentDescription = summary },
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
@@ -405,7 +427,19 @@ private fun TopRestaurantsCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onOpenRestaurant(rank.restaurantId) },
+                    .clickable { onOpenRestaurant(rank.restaurantId) }
+                    // 整行拼成一句播报。默认逐个子元素朗读会把「1」「老王面馆」「3 次」
+                    // 拆成三段互不相关的信息，听不出这是「第 1 名，去过 3 次」。
+                    // clearAndSetSemantics 会清掉 clickable 的语义，因此必须重新补上
+                    // role 与 onClick —— 否则屏幕阅读器读不出这里可以点击。
+                    .clearAndSetSemantics {
+                        contentDescription = "第 ${index + 1} 名 ${rank.name}，去过 ${rank.count} 次"
+                        role = Role.Button
+                        onClick(label = "查看店铺") {
+                            onOpenRestaurant(rank.restaurantId)
+                            true
+                        }
+                    },
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -433,7 +467,10 @@ private fun TopRestaurantsCard(
                         .fillMaxWidth()
                         .height(4.dp)
                         .clip(RoundedCornerShape(2.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        // 比例条是纯装饰：次数已经在上面的文字里说过了，
+                        // 不排除的话屏幕阅读器会多读一个无意义的空元素。
+                        .clearAndSetSemantics { },
                 ) {
                     Box(
                         modifier = Modifier

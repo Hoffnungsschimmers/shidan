@@ -37,6 +37,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -178,7 +180,12 @@ private fun PhotoViewer(target: PhotoTarget, onDismiss: () -> Unit) {
                 text = "${pagerState.currentPage + 1} / ${target.paths.size}",
                 modifier = Modifier
                     .background(Color(0x66000000), CircleShape)
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                    .padding(horizontal = 14.dp, vertical = 7.dp)
+                    // 视觉上是「3 / 9」这种紧凑写法，但屏幕阅读器会读成
+                    // 「三 斜杠 九」，含义不明。改为完整句式播报。
+                    .clearAndSetSemantics {
+                        contentDescription = "第 ${pagerState.currentPage + 1} 张，共 ${target.paths.size} 张"
+                    },
                 style = MaterialTheme.typography.labelLarge,
                 color = Color.White,
             )

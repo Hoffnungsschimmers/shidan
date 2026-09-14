@@ -89,11 +89,11 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 
 ## 当前版本与交付
 
-- **v0.3.4**（versionCode 7）。花费字段、MIUIx 视觉重做、信息架构重排、玻璃材质、
-  照片查看器、统计页、封面复用、深色模式切换、分享卡片均已完成。
-- 交付物在 `安装包/`：`味笺-v0.3.4-release.apk`（已签名，2,045,723 B，
-  sha256 `84884074cac946b1cecc00b5d87f56bd313dacd27c05cc0cc342eb9ad065e469`）、
-  `味笺-v0.3.4-debug.apk`（18,883,829 B）。
+- **v0.3.5**（versionCode 8）。花费字段、MIUIx 视觉重做、信息架构重排、玻璃材质、
+  照片查看器、统计页、封面复用、深色模式切换、分享卡片、无障碍细化均已完成。
+- 交付物在 `安装包/`：`味笺-v0.3.5-release.apk`（已签名，2,045,723 B，
+  sha256 `bb6730b1ff61575ed6a908e2202b175dacf4a4565df76897b1bbbd8709f26292`）、
+  `味笺-v0.3.5-debug.apk`（18,883,829 B）。
 - 签名密钥库 `mealnote-release.jks`（项目根目录），凭据在 `local.properties`。
   `.gitignore` 已排除 `*.jks` / `local.properties` / `*.apk`。
   **密钥库是单点故障**：丢失后已安装用户无法覆盖升级。
@@ -122,10 +122,34 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 瞬间删掉仍在使用的文件（v0.3.3 修复的正是这个自 v0.2.0 起就存在的 bug）。
 已有 9 个单元测试覆盖（`ReclaimableFormPhotosTest`）。
 
+## 无障碍硬约定（改 UI 时必须遵守）
+
+「视觉上表达了、但语义树里没有」等于对屏幕阅读器不存在。
+
+- 分段控件/标签页：容器 `selectableGroup()` + 选项 `selectable(selected)`，**必须配对**。
+- `clearAndSetSemantics` 会**清掉 `clickable` 的语义**，必须显式补回 `role` 与
+  `onClick`（或 `disabled`），否则控件对无障碍服务直接消失。
+- 按钮加载中：标签被替换成转圈会让语义变空，必须保留 `contentDescription` +
+  `stateDescription = "处理中"`。
+- 图表整体给 `contentDescription`；纯装饰元素（指示块、比例条）用
+  `clearAndSetSemantics {}` 排除。
+- 带滚动动画的数字要锁定最终值播报。
+- 紧凑记法（`3 / 9`）会被读成「三 斜杠 九」，要写成完整句子。
+- 大字体：固定高度会裁字。按**文字行高反推最小高度**，并保证常规字号下
+  算出来的值仍小于原高度 —— **默认外观必须完全不变**。
+- **卡片内含可交互子元素时不能 `mergeDescendants`**，否则子元素对 TalkBack 失效。
+  `MiuixCard` 是通用组件无法自行判断，因此不加。
+
 ## 明确评估后放弃的功能（不要贸然加回）
 
 （暂无。原先列为「放弃」的「从用餐照片设置封面」已在 v0.3.3 完成 ——
 前置的引用守卫重构已做完，见上节。）
+
+评估过但暂缓的：
+
+- **底部导航栏跟随大字体长高**：需要连带把 `MainContentBottomPadding`（104dp 常量）
+  动态化，牵动三个标签页的 padding。fontScale 2.0 时现状勉强够用，收益小改动面大。
+- **分享卡片接入足迹时间线**：卡片上加按钮会让每张卡高 48dp，影响浏览密度。
 
 ## 其他
 

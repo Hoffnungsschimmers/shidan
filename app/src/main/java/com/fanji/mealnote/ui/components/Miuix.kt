@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material.icons.Icons
@@ -45,11 +47,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.fanji.mealnote.ui.theme.mealTokens
 import com.fanji.mealnote.ui.theme.softShadow
@@ -164,7 +174,9 @@ fun MiuixButton(
 
     Box(
         modifier = modifier
-            .height(height)
+            // heightIn 而非 height：大字体下按钮要能长高，否则文字会被裁掉。
+            // 主按钮的 54dp 是**最小**高度而非固定高度。
+            .heightIn(min = height)
             .pressScale(interaction, enabled = active)
             .then(
                 // 只有实心主按钮投同色系光晕：其它样式加投影会与卡片阴影混淆层次。
@@ -195,6 +207,23 @@ fun MiuixButton(
                 role = Role.Button,
                 onClick = onClick,
             )
+            // 语义整体重写，原因是 loading 时标签会被换成转圈 ——
+            // 默认语义会变成一片空白，屏幕阅读器既读不出按钮名，也不知道正在处理。
+            // clearAndSetSemantics 会清掉 clickable 的语义，因此这里必须补回
+            // role 与 onClick（或 disabled），否则按钮对无障碍服务就"消失"了。
+            .clearAndSetSemantics {
+                contentDescription = label
+                role = Role.Button
+                if (loading) stateDescription = "处理中"
+                if (active) {
+                    onClick(label = label) {
+                        onClick()
+                        true
+                    }
+                } else {
+                    disabled()
+                }
+            }
             .padding(horizontal = 22.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -234,6 +263,12 @@ fun MiuixButton(
  * 因此选中态用一块会滑动的白色指示块表达，而不是下划线。
  *
  * 指示块的位移动画使用弹簧，快速连点时能自然衔接而不会闪回起点。
+ *
+ * ## 无障碍
+ *
+ * 容器是 `selectableGroup`，每个选项是 `selectable`（而不是 `clickable` + `Role.Tab`）。
+ * 这两者必须配对使用，否则屏幕阅读器只会把选项读成「按钮」，
+ * **不会播报哪个是当前选中项** —— 视觉上有指示块，但非视觉用户完全得不到这个信息。
  */
 @Composable
 fun <T> MiuixSegmented(
@@ -250,12 +285,25 @@ fun <T> MiuixSegmented(
     val indicatorShape = MaterialTheme.shapes.small
     val tokens = MaterialTheme.mealTokens
 
+    // 高度跟随字体缩放：固定 46dp 在系统字体放到最大档时会把文字裁掉。
+    // 用「文字行高 + 内边距」反推，正常字号下算出来仍小于 46dp，
+    // 因此**常规情况下高度不变**，只有大字体时才撑高。
+    val density = LocalDensity.current
+    val labelLineHeight = MaterialTheme.typography.labelLarge.lineHeight
+    val textHeight = if (labelLineHeight == TextUnit.Unspecified) {
+        SEGMENT_HEIGHT
+    } else {
+        with(density) { labelLineHeight.toDp() }
+    }
+    val segmentHeight = maxOf(SEGMENT_HEIGHT, textHeight + SEGMENT_INSET * 2 + 10.dp)
+
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .height(SEGMENT_HEIGHT)
+            .height(segmentHeight)
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .selectableGroup(),
     ) {
         val itemWidth = maxWidth / options.size
         val indicatorOffset by animateDpAsState(
@@ -273,14 +321,17 @@ fun <T> MiuixSegmented(
                 // 非 lambda 版本会在每次重组时重新读取状态值，导致重组范围扩大。
                 .offset { IntOffset(x = indicatorOffset.roundToPx(), y = 0) }
                 .width(itemWidth)
-                .height(SEGMENT_HEIGHT)
+                .height(segmentHeight)
                 .padding(SEGMENT_INSET)
                 .softShadow(indicatorShape, 2.dp, tokens.shadowAmbient, tokens.shadowSpot)
                 .clip(indicatorShape)
-                .background(MaterialTheme.colorScheme.surface),
+                .background(MaterialTheme.colorScheme.surface)
+                // 指示块是纯装饰：选中状态已经由选项自身的 selectable 语义表达，
+                // 不排除的话屏幕阅读器会多读一遍无意义的空元素。
+                .clearAndSetSemantics { },
         )
 
-        Row(Modifier.fillMaxWidth().height(SEGMENT_HEIGHT)) {
+        Row(Modifier.fillMaxWidth().height(segmentHeight)) {
             options.forEach { option ->
                 val active = option == selected
                 // 文字颜色也做过渡，否则指示块滑到位了文字还是瞬间跳变。
@@ -296,8 +347,9 @@ fun <T> MiuixSegmented(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(SEGMENT_HEIGHT)
-                        .clickable(
+                        .height(segmentHeight)
+                        .selectable(
+                            selected = active,
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             role = Role.Tab,

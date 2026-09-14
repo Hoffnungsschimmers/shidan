@@ -270,6 +270,35 @@ Display 36/43 · Headline 30/38、26/33 · Title 20/27、16/23 · Body 16/25、1
 - 编辑/删除使用**显式按钮**而非长按菜单（长按是隐藏交互，无障碍服务难以发现）。
 - 危险操作整行/整块变色，而不是只把文字变红。
 
+### 语义（Semantics）约定
+
+「视觉上表达了、但语义树里没有」等于对屏幕阅读器不存在。以下几条是硬约定：
+
+| 场景 | 要求 |
+| --- | --- |
+| 分段控件 / 标签页 | 容器 `selectableGroup()` + 选项 `selectable(selected)`，**必须配对**，否则读不出选中态 |
+| 按钮加载中 | 标签被替换成转圈时，语义会变空。必须用 `clearAndSetSemantics` 保留标签 + `stateDescription = "处理中"` |
+| `clearAndSetSemantics` | 会**清掉 `clickable` 的语义**，必须显式补回 `role` 与 `onClick`（或 `disabled`） |
+| 图表 | 结构上全是 Box，需整体 `contentDescription`；逐柱朗读既冗长又还原不出趋势 |
+| 排行榜整行 | 拼成一句（`第 1 名 X，去过 3 次`），默认逐子元素朗读会拆成互不相关的片段 |
+| 纯装饰元素 | 指示块、比例条、分隔线用 `clearAndSetSemantics {}` 排除 |
+| 带滚动动画的数字 | 锁定最终值播报，否则可能读到动画中间值 |
+| 紧凑记法 | `3 / 9` 会被读成「三 斜杠 九」，改为 `第 3 张，共 9 张` |
+
+### 大字体
+
+固定高度会在大字体下裁字。做法是**按文字行高反推最小高度**，
+让常规字号下算出来的值仍小于原定高度 —— 也就是**默认外观完全不变**，只有大字体才撑高：
+
+```kotlin
+val labelLineHeight = MaterialTheme.typography.labelLarge.lineHeight
+val textHeight = with(LocalDensity.current) { labelLineHeight.toDp() }
+val segmentHeight = maxOf(SEGMENT_HEIGHT, textHeight + SEGMENT_INSET * 2 + 10.dp)
+```
+
+`MiuixButton` 同理，用 `heightIn(min = height)` 而不是 `height(height)`：
+54dp 是**最小**高度而非固定高度。
+
 ---
 
 ## 十一、数据与隐私
