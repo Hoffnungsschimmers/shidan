@@ -490,8 +490,6 @@ class MealRepository @Inject constructor(
      * 截断而非报错：超长输入通常来自粘贴，静默丢弃尾部比弹出错误更符合预期，
      * 也不会让用户已经填好的其它字段白填。长度上限由各字段常量约束。
      */
-    private fun String.normalizeText(limit: Int): String = trim().take(limit)
-
     /** 当前所有表单未提交图片的快照，用于 [cleanupOrphanPhotos] 构建排除集合。 */
     private fun pendingPhotoSnapshot(): List<String> =
         _pendingPhotoCleanup.values.flatten()

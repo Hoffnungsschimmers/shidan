@@ -2,6 +2,75 @@
 
 本项目遵循语义化版本思路记录主要变更。
 
+## 0.3.8
+
+### 修复：超长文本截断会把 emoji 切成半个（数据损坏）
+
+自由文本（花费 / 餐品 / 备注）的统一入库处理原本是一行：
+
+```kotlin
+private fun String.normalizeText(limit: Int): String = trim().take(limit)
+```
+
+`take(limit)` 数的是 **UTF-16 码元**，不是字符。增补平面字符（绝大多数 emoji）
+在 UTF-16 里占**两个**码元，因此在截断边界上会被切成半个代理对，
+产生一个**非法的 UTF-16 字符串**：
+
+```kotlin
+"很好吃😋".take(3)   // → "很好吃" + 半个代理对（孤立的高代理）
+```
+
+后果不是「显示得不好看」，而是数据本身坏掉：
+
+- 存入数据库后再读出，渲染成替换字符 `�`；
+- 写进 JSON 备份时，孤立代理会被编码成非法转义，**备份文件可能直接无法解析**；
+- 往返一次备份/恢复后，原文永久丢失。
+
+修复为**按 code point 截断**，`offsetByCodePoints` 会自动跳过完整的代理对：
+
+```kotlin
+internal fun String.normalizeText(limit: Int): String {
+    val trimmed = trim()
+    val codePoints = trimmed.codePointCount(0, trimmed.length)
+    if (codePoints <= limit) return trimmed
+    return trimmed.substring(0, trimmed.offsetByCodePoints(0, limit))
+}
+```
+
+顺带把长度上限的语义统一为**码点**（一个 emoji 算 1 个字符，而不是 2 个）。
+
+### 已知近似（刻意不处理）
+
+截断级别是 **code point**，不是**字素簇**。由零宽连接符（ZWJ）拼成的复合 emoji
+可能被拆开 —— `👨‍👩‍👧` 会截成 `👨‍👩`（两个人）。视觉上不理想，
+但**仍是合法字符串**，不会损坏数据。
+
+要做到字素簇级别需要 `java.text.BreakIterator`，其行为依赖默认 locale，
+而这三处限制（花费 40 / 餐品 500 / 备注 2000）在真实输入里几乎不会正好落在
+ZWJ 序列中间。为这点收益引入 locale 依赖不划算。
+
+### 新增：`MealTextTest`（18 个用例）
+
+| 分组 | 覆盖 |
+| --- | --- |
+| 空白处理 | 首尾半角/全角空白（U+3000）被去掉；中间空格保留；纯空白变空串 |
+| 截断 | 未超限原样返回；超限截断；中文按 1 计；limit=0；limit 为负抛异常 |
+| **代理对（回归重点）** | emoji 不被切成半个；截断点落在 emoji 上时整体丢弃；全是 emoji 时按个数截断；**穷举 0..N 每个长度断言结果不含孤立代理** |
+| 真实约束 | 三个实际上限都能正确工作；粘贴整段聊天记录时静默截断不报错 |
+
+其中「穷举每个长度都不产生孤立代理」是这次修复的核心保障 ——
+它不针对某个具体输入，而是对任意截断位置都成立。
+
+### 验证
+
+```
+单元测试 ：92 个用例全部通过（新增 18 个）
+Lint     ：0 错误、0 告警
+构建     ：assembleDebug / assembleRelease 全部 SUCCESS
+签名     ：apksigner verify 通过（v2 方案）
+数据库   ：version 3（本版未改动 schema）
+```
+
 ## 0.3.7
 
 统计聚合逻辑可测试化。这一版没有功能变化，纯粹是为了让**跨年、月末、时区**

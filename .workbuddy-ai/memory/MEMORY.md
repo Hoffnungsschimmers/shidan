@@ -89,11 +89,11 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 
 ## 当前版本与交付
 
-- **v0.3.7**（versionCode 10）。功能已齐（花费、MIUIx 视觉、信息架构、玻璃、照片查看器、
+- **v0.3.8**（versionCode 11）。功能已齐（花费、MIUIx 视觉、信息架构、玻璃、照片查看器、
   统计、封面复用、深色模式、分享卡片、无障碍细化）。
-- 交付物在 `安装包/`：`味笺-v0.3.7-release.apk`（已签名，2,045,723 B，
-  sha256 `0c6d097e7e3724571c07e8283a0554b7c004104a81806ac22e38e4cf08cfd109`）、
-  `味笺-v0.3.7-debug.apk`（18,883,829 B）。
+- 交付物在 `安装包/`：`味笺-v0.3.8-release.apk`（已签名，2,045,727 B，
+  sha256 `7463d24b81704b7b854a9c3aeff582f66367909404ca7f306faae1db36de3d7a`）、
+  `味笺-v0.3.8-debug.apk`（18,883,829 B）。
 - 签名密钥库 `mealnote-release.jks`（项目根目录），凭据在 `local.properties`。
   `.gitignore` 已排除 `*.jks` / `local.properties` / `*.apk`。
   **密钥库是单点故障**：丢失后已安装用户无法覆盖升级。
@@ -134,6 +134,21 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 v0.3.3 的换封面误删、v0.3.6 的回收失效，都是靠主动重读删除代码发现的。
 每次大改之后，把 `onCleared` / `deleteXxx` / `updateXxx` 里所有涉及文件删除的
 分支重读一遍。
+
+## 审计字符串处理（同样例行）
+
+v0.3.8 发现 `normalizeText` 用 `take(limit)` 截断，而 `take` 数的是
+**UTF-16 码元**，会把 emoji 的代理对切成半个，产生非法字符串
+（入库显示 `�`、JSON 备份可能无法解析）。**已改为按 code point 截断**
+（`offsetByCodePoints`），统一入口见 `data/MealText.kt`。
+
+**禁止再用 `String.take(n)` / `substring(0, n)` 做「长度限制」** ——
+只要输入可能含 emoji，就必须按 code point 或字素簇。
+
+长度上限的语义统一为**码点**（一个 emoji 算 1 个字符）。
+已知近似：ZWJ 复合 emoji（`👨‍👩‍👧`）可能被拆开，视觉不理想但不损坏数据 ——
+要修需引入 `java.text.BreakIterator` 与 locale 依赖，不划算，已在代码注释与
+CHANGELOG 中写明。
 
 ## 无障碍硬约定（改 UI 时必须遵守）
 

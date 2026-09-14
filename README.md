@@ -124,6 +124,7 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 <junit-4.13.2.jar>;<kotlin-stdlib.jar>;<hamcrest-core-1.3.jar>" \
   org.junit.runner.JUnitCore \
   com.fanji.mealnote.data.MealResultTest \
+  com.fanji.mealnote.data.MealTextTest \
   com.fanji.mealnote.data.local.ConvertersTest \
   com.fanji.mealnote.ui.FormattersTest \
   com.fanji.mealnote.ui.home.HomeFilterTest \
@@ -139,7 +140,7 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 
 | 检查项 | 状态 |
 |---|---|
-| `testDebugUnitTest` | 74 个用例全部通过（经 JDK 直接运行验证，见上方环境问题说明） |
+| `testDebugUnitTest` | 92 个用例全部通过（经 JDK 直接运行验证，见上方环境问题说明） |
 | `lintDebug` | 通过（0 错误） |
 | `assembleDebug` | 通过 |
 | `assembleRelease` | 通过（R8 混淆 + 资源裁剪，已签名） |
