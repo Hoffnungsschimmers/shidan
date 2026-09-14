@@ -2,6 +2,74 @@
 
 本项目遵循语义化版本思路记录主要变更。
 
+## 0.3.7
+
+统计聚合逻辑可测试化。这一版没有功能变化，纯粹是为了让**跨年、月末、时区**
+这些边界第一次有保障。
+
+### 问题：核心聚合逻辑测不了
+
+「足迹」页的统计计算原本是 `FootprintViewModel` 内部的私有扩展函数，
+并且直接读系统时钟：
+
+```kotlin
+private fun List<FootprintEntry>.toMonthlyCounts(): List<MonthlyCount> {
+    val current = YearMonth.now()                     // ← 读时钟
+    val counts = groupingBy { it.record.eatenAt.toYearMonth() }.eachCount()
+    ...
+}
+private fun Long.toYearMonth(): YearMonth =
+    Instant.ofEpochMilli(this).atZone(ZoneId.systemDefault())   // ← 读时区
+```
+
+同一个输入在不同日期、不同时区会得到不同结果，测试只能断言「跑得通」，
+断言不了正确性。而这里的边界恰恰是最容易写错、又最难手工验证的：
+
+- 跨年时 12 个月的窗口从哪个月开始？
+- UTC 的 `2025-12-31 23:00` 应该落在哪个月的柱子上？
+- 「常去的店」次数相同时顺序稳定吗？
+- 花费一条都识别不出来时，该显示 `¥0` 还是「没有可识别金额」？
+
+### 改动
+
+新增 `ui/home/FootprintAggregation.kt`，把六个聚合函数抽成**纯函数**，
+`today` 与 `zone` 提升为参数：
+
+```kotlin
+internal fun List<FootprintEntry>.toMonthlyCounts(
+    today: YearMonth, zone: ZoneId, months: Int = MONTHS_IN_CHART,
+): List<MonthlyCount>
+```
+
+ViewModel 只剩「读一次时钟 + 组装状态」。好处：
+
+- 测试可固定任意日期（含跨年、月末、闰年）与时区；
+- 时区从隐藏依赖变成**显式契约**；
+- 计算与状态组装分离，ViewModel 明显变短。
+
+### 新增测试：`FootprintAggregationTest`（21 个用例）
+
+| 分组 | 覆盖 |
+| --- | --- |
+| 时区 | 月份归属随时区变化；`isInYear` 用指定时区判定 |
+| 月度柱状图 | 空数据仍返回固定 12 个月；窗口从早到晚；窗口外不计入；同月累加；时区决定落在哪根柱子；月份数可配置；月份数必须为正 |
+| 常去的店 | 次数倒序；**次数相同时按 id 升序**（顺序稳定，避免排行榜无理由跳动）；上限生效；空数据 |
+| 花费估算 | 只统计指定年份；识别不出的跳过而非计零；**全识别不出时返回 null 而非 0**；该年无记录返回 null；单条解析；年份判定受时区影响 |
+| 月份分组 | 保持输入顺序（不再二次排序，否则会打乱「月内倒序」）；空数据 |
+
+> 为什么这些值得写：我**无法运行这个应用**，单元测试是我唯一能自动验证的东西。
+> 而时区与跨年边界靠手工点界面几乎不可能覆盖 —— 除非恰好在跨年那一刻打开应用。
+
+### 验证
+
+```
+单元测试 ：74 个用例全部通过（新增 21 个）
+Lint     ：0 错误、0 告警
+构建     ：assembleDebug / assembleRelease 全部 SUCCESS
+签名     ：apksigner verify 通过（v2 方案）
+数据库   ：version 3（本版未改动 schema）
+```
+
 ## 0.3.6
 
 ### 修复：「放弃表单时回收未提交图片」从未真正执行（4 个表单页）

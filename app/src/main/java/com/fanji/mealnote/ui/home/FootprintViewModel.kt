@@ -6,15 +6,12 @@ import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.local.DiningRecordEntity
 import com.fanji.mealnote.data.local.PhotoEntity
 import com.fanji.mealnote.data.local.Verdict
-import com.fanji.mealnote.ui.formatMonthLabel
-import com.fanji.mealnote.ui.parseEstimatedAmount
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
 import javax.inject.Inject
@@ -130,6 +127,12 @@ class FootprintViewModel @Inject constructor(
         val term = query.trim()
         val visible = if (term.isEmpty()) all else all.filter { it.matches(term) }
 
+        // 时钟与时区在这里读取一次并向下传递，聚合逻辑本身保持纯函数（见 FootprintAggregation.kt）。
+        // 每次数据变化都重新读时钟，因此应用跨年驻留后台后统计会自动切到新年度。
+        val today = YearMonth.now()
+        val zone = ZoneId.systemDefault()
+        val currentYear = today.year
+
         FootprintUiState(
             sections = visible.toSections(),
             query = query,
@@ -138,16 +141,18 @@ class FootprintViewModel @Inject constructor(
             goodCount = all.count { it.record.verdict == Verdict.GOOD },
             mehCount = all.count { it.record.verdict == Verdict.MEH },
             badCount = all.count { it.record.verdict == Verdict.BAD },
-            yearCount = all.count { it.record.eatenAt.toYearMonth().year == currentYear },
+            yearCount = all.count { it.isInYear(currentYear, zone) },
             visitedCount = all.map { it.record.restaurantId }.distinct().size,
-            estimatedSpendThisYear = all.estimatedSpendIn(currentYear),
-            amountRecognizedCount = all.count { it.isInYear(currentYear) && it.amount() != null },
-            amountUnrecognizedCount = all.count {
-                it.isInYear(currentYear) &&
-                    it.record.priceText.isNotBlank() &&
-                    it.amount() == null
+            estimatedSpendThisYear = all.estimatedSpendIn(currentYear, zone),
+            amountRecognizedCount = all.count {
+                it.isInYear(currentYear, zone) && it.estimatedAmount() != null
             },
-            monthlyCounts = all.toMonthlyCounts(),
+            amountUnrecognizedCount = all.count {
+                it.isInYear(currentYear, zone) &&
+                    it.record.priceText.isNotBlank() &&
+                    it.estimatedAmount() == null
+            },
+            monthlyCounts = all.toMonthlyCounts(today, zone),
             topRestaurants = all.toTopRestaurants(),
         )
     }.stateIn(
@@ -173,88 +178,7 @@ class FootprintViewModel @Inject constructor(
             record.priceText.contains(keyword, ignoreCase = true) ||
             record.note.contains(keyword, ignoreCase = true)
 
-    /**
-     * 按月份分组。
-     *
-     * 依赖上游已按 `eatenAt DESC` 排序（见 `MealDao.observeAllDiningRecords`），
-     * 因此这里用 `groupBy` 即可保持「新月份在前、月内新记录在前」的顺序，
-     * 不需要二次排序。若上游排序被改动，此处顺序会一并失效。
-     */
-    private fun List<FootprintEntry>.toSections(): List<FootprintSection> =
-        groupBy { it.record.eatenAt.formatMonthLabel() }
-            .map { (title, entries) -> FootprintSection(title, entries) }
-
-    // ---------------------------------------------------------------- 统计聚合
-
-    /**
-     * 当前年份。
-     *
-     * 用 `get()` 而非构造时缓存：应用长期驻留后台跨年后，
-     * 缓存的年份会让「今年」的统计停留在上一年。
-     */
-    private val currentYear: Int get() = YearMonth.now().year
-
-    private fun Long.toYearMonth(): YearMonth =
-        Instant.ofEpochMilli(this).atZone(ZoneId.systemDefault()).let(YearMonth::from)
-
-    private fun FootprintEntry.isInYear(year: Int): Boolean =
-        record.eatenAt.toYearMonth().year == year
-
-    /** 本条记录的花费估算；未填写或识别不出数字时为 `null`。 */
-    private fun FootprintEntry.amount(): Double? =
-        record.priceText.takeIf(String::isNotBlank)?.parseEstimatedAmount()
-
-    /**
-     * 今年的花费估算合计。
-     *
-     * 一条都识别不出来时返回 `null` 而不是 `0.0`：界面上「约 ¥0」会被读成
-     * 「今年没花钱」，而事实是「没有可识别的金额」。
-     */
-    private fun List<FootprintEntry>.estimatedSpendIn(year: Int): Double? =
-        filter { it.isInYear(year) }
-            .mapNotNull { it.amount() }
-            .takeIf { it.isNotEmpty() }
-            ?.sum()
-
-    /**
-     * 最近 [MONTHS_IN_CHART] 个月的用餐次数，从最早到最新。
-     *
-     * 以**当前月**为基准向前取，而不是取数据中出现过的月份：
-     * 柱状图的横轴必须固定，否则某个月没有记录时该柱会消失、整张图的月份间距错乱。
-     */
-    private fun List<FootprintEntry>.toMonthlyCounts(): List<MonthlyCount> {
-        val current = YearMonth.now()
-        val counts = groupingBy { it.record.eatenAt.toYearMonth() }.eachCount()
-        return (MONTHS_IN_CHART - 1 downTo 0).map { monthsAgo ->
-            val month = current.minusMonths(monthsAgo.toLong())
-            MonthlyCount(
-                yearMonth = month.toString(),
-                label = "${month.monthValue}月",
-                count = counts[month] ?: 0,
-            )
-        }
-    }
-
-    /** 常去的店，按次数倒序；次数相同时按 id 升序，保证顺序稳定不抖动。 */
-    private fun List<FootprintEntry>.toTopRestaurants(): List<RestaurantRank> =
-        groupingBy { it.record.restaurantId }
-            .eachCount()
-            .entries
-            .sortedWith(compareByDescending<Map.Entry<Long, Int>> { it.value }.thenBy { it.key })
-            .take(MAX_TOP_RESTAURANTS)
-            .mapNotNull { (id, count) ->
-                // 从已有条目里取店名，避免再查一次数据库。
-                firstOrNull { it.record.restaurantId == id }
-                    ?.let { RestaurantRank(id, it.restaurantName, count) }
-            }
-
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L
-
-        /** 月度柱状图展示的月份数。 */
-        const val MONTHS_IN_CHART = 12
-
-        /** 「常去的店」最多展示几家。 */
-        const val MAX_TOP_RESTAURANTS = 5
     }
 }

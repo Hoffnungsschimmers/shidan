@@ -128,7 +128,9 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
   com.fanji.mealnote.ui.FormattersTest \
   com.fanji.mealnote.ui.home.HomeFilterTest \
   com.fanji.mealnote.data.PendingPhotoCleanupConcurrencyTest \
-  com.fanji.mealnote.data.backup.BackupEntryNameSafetyTest
+  com.fanji.mealnote.data.backup.BackupEntryNameSafetyTest \
+  com.fanji.mealnote.ui.edit.ReclaimableFormPhotosTest \
+  com.fanji.mealnote.ui.home.FootprintAggregationTest
 ```
 
 依赖 jar 位于 `~/.gradle/caches/modules-2/files-2.1/` 下。
@@ -137,7 +139,7 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 
 | 检查项 | 状态 |
 |---|---|
-| `testDebugUnitTest` | 53 个用例全部通过（经 JDK 直接运行验证，见上方环境问题说明） |
+| `testDebugUnitTest` | 74 个用例全部通过（经 JDK 直接运行验证，见上方环境问题说明） |
 | `lintDebug` | 通过（0 错误） |
 | `assembleDebug` | 通过 |
 | `assembleRelease` | 通过（R8 混淆 + 资源裁剪，已签名） |

@@ -89,11 +89,11 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 
 ## 当前版本与交付
 
-- **v0.3.6**（versionCode 9）。功能已齐（花费、MIUIx 视觉、信息架构、玻璃、照片查看器、
+- **v0.3.7**（versionCode 10）。功能已齐（花费、MIUIx 视觉、信息架构、玻璃、照片查看器、
   统计、封面复用、深色模式、分享卡片、无障碍细化）。
-- 交付物在 `安装包/`：`味笺-v0.3.6-release.apk`（已签名，2,045,723 B，
-  sha256 `a30e75ae8276184987c02503e1933795f42500b706420e46e364e921f5c3bb43`）、
-  `味笺-v0.3.6-debug.apk`（18,883,825 B）。
+- 交付物在 `安装包/`：`味笺-v0.3.7-release.apk`（已签名，2,045,723 B，
+  sha256 `0c6d097e7e3724571c07e8283a0554b7c004104a81806ac22e38e4cf08cfd109`）、
+  `味笺-v0.3.7-debug.apk`（18,883,829 B）。
 - 签名密钥库 `mealnote-release.jks`（项目根目录），凭据在 `local.properties`。
   `.gitignore` 已排除 `*.jks` / `local.properties` / `*.apk`。
   **密钥库是单点故障**：丢失后已安装用户无法覆盖升级。
@@ -152,6 +152,26 @@ v0.3.3 的换封面误删、v0.3.6 的回收失效，都是靠主动重读删除
   算出来的值仍小于原高度 —— **默认外观必须完全不变**。
 - **卡片内含可交互子元素时不能 `mergeDescendants`**，否则子元素对 TalkBack 失效。
   `MiuixCard` 是通用组件无法自行判断，因此不加。
+
+## 测试策略
+
+**本机跑不了这个应用，单元测试是唯一的自动验证手段**，因此测试覆盖优先级很高。
+
+- 运行方式：Gradle 的 `testDebugUnitTest` 在本机全部报 `ClassNotFoundException`
+  （环境问题，见 `README.md`），必须用 JDK 直接跑 `org.junit.runner.JUnitCore`。
+  当前 8 个测试类、74 个用例。
+- **纯逻辑必须抽成不读系统时钟/时区的函数**，把 `today` / `zone` 作为参数传入。
+  否则测试只能断言「跑得通」。范例：`ui/home/FootprintAggregation.kt`。
+- 把**设计决策锁进测试**，而不只测计算结果。例如
+  「花费全识别不出时返回 `null` 而非 `0`」「排行榜次数相同时按 id 升序」——
+  以后有人想「简化」掉这些行为，测试会拦下来。
+- 测试类清单（新增测试必须同时更新 `README.md` 里的 JDK 运行命令）：
+  `MealResultTest`、`ConvertersTest`、`FormattersTest`、`HomeFilterTest`、
+  `PendingPhotoCleanupConcurrencyTest`、`BackupEntryNameSafetyTest`、
+  `ReclaimableFormPhotosTest`、`FootprintAggregationTest`。
+- **零覆盖的缺口**：`MealRepository` 与全部 ViewModel。要补需要
+  Room 测试环境与协程测试调度器，且 `MealRepository` 是具体类不是接口，
+  得先重构出接口或把纯逻辑继续往下抽。
 
 ## 明确评估后放弃的功能（不要贸然加回）
 
