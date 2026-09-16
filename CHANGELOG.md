@@ -437,7 +437,7 @@ Lint     ：0 错误、0 告警
 
 - 项目此前未做版本控制，本次 `git init` 并将 v0.3.0 全部源码作为首个提交纳入。
 - `.gitignore` 已排除 `local.properties`（含签名口令）、`mealnote-release.jks`、
-  `安装包/*.apk` 与 `app/build/`。
+  `apk/*.apk` 与 `app/build/`。
 
 ### 验证
 

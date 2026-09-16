@@ -96,7 +96,7 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 
 - **v0.3.8**（versionCode 11）。功能已齐（花费、MIUIx 视觉、信息架构、玻璃、照片查看器、
   统计、封面复用、深色模式、分享卡片、无障碍细化）。
-- 交付物在 `安装包/`：`味笺-v0.3.8-release.apk`（已签名，2,045,727 B，
+- 交付物在 `apk/`：`味笺-v0.3.8-release.apk`（已签名，2,045,727 B，
   sha256 `7463d24b81704b7b854a9c3aeff582f66367909404ca7f306faae1db36de3d7a`）、
   `味笺-v0.3.8-debug.apk`（18,883,829 B）。
 - 签名密钥库 `mealnote-release.jks`（项目根目录），凭据在 `local.properties`。
