@@ -88,7 +88,7 @@ app/build/outputs/apk/debug/app-debug.apk
 （非副本）：
 
 ```text
-C:\Users\2540\mealnote-workspace  ->  C:\Users\2540\Desktop\饭
+C:\Users\2540\mealnote-workspace  ->  C:\Users\2540\Desktop\mealnote
 ```
 
 建议所有 Gradle 命令从英文入口执行，并显式传入 JDK 17 路径：

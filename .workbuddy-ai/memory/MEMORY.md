@@ -3,7 +3,7 @@
 ## 项目定位
 
 本地优先的 Android 个人餐厅收藏与用餐记录应用。包名 `com.fanji.mealnote`，
-应用名「味笺」。目录 `C:\Users\2540\Desktop\饭`。
+应用名「味笺」。目录 `C:\Users\2540\Desktop\mealnote`。
 
 产品收敛为两种入口（由悬浮按钮的底部面板二选一）：
 - **想吃，还没去**：仅店名（必填）、可选地址、一张封面图；
@@ -24,7 +24,12 @@ compileSdk = targetSdk = 36，minSdk = 26，Java 17。
 
 ## 构建命令（必须遵守）
 
-- 从英文联接路径执行：`C:\Users\2540\mealnote-workspace`（指向中文目录，非副本）。
+> 项目目录已于 2026-09-16 从中文名 `饭` 迁移到英文名 `mealnote`。
+> 现在**真实路径本身就是英文**，不再依赖联接绕开中文路径限制。
+
+- 直接在新路径执行：`C:\Users\2540\Desktop\mealnote`。
+- `C:\Users\2540\mealnote-workspace` 是指向它的目录联接，**现已冗余**，
+  保留只是为了不改动旧命令；随时可删（`rmdir`）。
 - JDK 17 在 `D:\env\jdk-17.0.16+8`，必须显式传
   `-Porg.gradle.java.installations.paths="D:/env/jdk-17.0.16+8"`。
 - 缓存权限异常时加 `--no-build-cache`，必要时删除 `C:\Users\2540\.gradle\caches\build-cache-1`。

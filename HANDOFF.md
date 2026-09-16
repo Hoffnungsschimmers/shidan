@@ -1,7 +1,7 @@
 # 饭记项目交接文档
 
 > 交接日期：2026-09-11  
-> 项目位置：`C:\Users\2540\Desktop\饭`  
+> 项目位置：`C:\Users\2540\Desktop\mealnote`  
 > 英文路径入口：`C:\Users\2540\mealnote-workspace`（目录联接，指向同一项目，不是副本）  
 > 当前阶段：Android 原型可运行，产品模型已重新聚焦，下一步应先重做设计再继续开发
 
@@ -9,10 +9,10 @@
 
 接手后请先完整阅读：
 
-1. `C:\Users\2540\Desktop\饭\HANDOFF.md`
-2. `C:\Users\2540\Desktop\饭\PROJECT_PLAN.md`
-3. `C:\Users\2540\Desktop\饭\README.md`
-4. `C:\Users\2540\Desktop\饭\CHANGELOG.md`
+1. `C:\Users\2540\Desktop\mealnote\HANDOFF.md`
+2. `C:\Users\2540\Desktop\mealnote\PROJECT_PLAN.md`
+3. `C:\Users\2540\Desktop\mealnote\README.md`
+4. `C:\Users\2540\Desktop\mealnote\CHANGELOG.md`
 
 然后检查实际代码与构建状态，不要仅依据旧 APK 或旧聊天描述。项目还不是 Git 仓库，修改前建议先初始化 Git 并保存当前基线，但不要未经用户要求创建提交。
 
@@ -260,7 +260,7 @@ testDebugUnitTest lintDebug assembleDebug
 
 ### 8.4 目录不是 Git 仓库
 
-当前 `C:\Users\2540\Desktop\饭` 没有 `.git`，没有提交历史，也不能方便回滚。建议新对话优先：
+当前 `C:\Users\2540\Desktop\mealnote` 没有 `.git`，没有提交历史，也不能方便回滚。建议新对话优先：
 
 ```powershell
 git init
@@ -401,7 +401,7 @@ app/schemas/com.fanji.mealnote.data.local.AppDatabase/
 ## 13. 可直接复制到新对话的提示词
 
 ```text
-请接手 C:\Users\2540\Desktop\饭 下的“饭记”Android 项目。先完整阅读 C:\Users\2540\Desktop\饭\HANDOFF.md、PROJECT_PLAN.md、README.md 和 CHANGELOG.md，并检查实际代码，不要假设旧 APK 是最新的。
+请接手 C:\Users\2540\Desktop\mealnote 下的“饭记”Android 项目。先完整阅读 C:\Users\2540\Desktop\mealnote\HANDOFF.md、PROJECT_PLAN.md、README.md 和 CHANGELOG.md，并检查实际代码，不要假设旧 APK 是最新的。
 
 第一步先统一清理吃后评价里遗留的星级/价格参数，并从英文路径 C:\Users\2540\mealnote-workspace 运行 testDebugUnitTest、lintDebug、assembleDebug，确保数据库 v1→v2 Migration 和现有数据安全。当前项目不是 Git 仓库；未经我明确要求不要 commit。
 
