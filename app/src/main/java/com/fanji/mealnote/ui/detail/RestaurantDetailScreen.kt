@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Restaurant
+import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -67,6 +68,7 @@ import com.fanji.mealnote.ui.components.ConfirmDialog
 import com.fanji.mealnote.ui.components.GlassSurface
 import com.fanji.mealnote.ui.components.MessageBanner
 import com.fanji.mealnote.ui.components.MiuixButton
+import com.fanji.mealnote.ui.components.MiuixButtonStyle
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixIconButton
 import com.fanji.mealnote.ui.components.PhotoPlaceholder
@@ -104,6 +106,8 @@ fun RestaurantDetailScreen(
     restaurantId: Long,
     onBack: () -> Unit,
     onAddVisit: () -> Unit,
+    /** 「照上次再来一份」：带入该条记录的内容打开表单。 */
+    onCopyLastVisit: (Long) -> Unit,
     onEditRestaurant: () -> Unit,
     onEditVisit: (Long) -> Unit,
     viewModel: RestaurantDetailViewModel = hiltViewModel(),
@@ -115,6 +119,9 @@ fun RestaurantDetailScreen(
     val context = LocalContext.current
     var shareTarget by remember { mutableStateOf<ShareCardData?>(null) }
     val pendingShareUri by viewModel.pendingShareUri.collectAsStateWithLifecycle()
+
+    // visits 已按用餐时间倒序，第一条就是最近一次。
+    val latestRecordId = uiState.visits.firstOrNull()?.record?.id
 
     // 分享图片写好后发起系统分享。必须消费掉 URI，否则返回本页会重复弹出分享面板。
     LaunchedEffect(pendingShareUri) {
@@ -290,15 +297,31 @@ fun RestaurantDetailScreen(
                     shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                     blurRadius = 30.dp,
                 ) {
-                    MiuixButton(
-                        label = "记录这一餐",
-                        onClick = onAddVisit,
-                        icon = Icons.Rounded.Add,
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .navigationBarsPadding()
                             .padding(horizontal = 20.dp, vertical = 14.dp),
-                    )
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        MiuixButton(
+                            label = "记录这一餐",
+                            onClick = onAddVisit,
+                            icon = Icons.Rounded.Add,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // 只有吃过才谈得上「照上次」。没有记录时不出现，
+                        // 避免一个点了没反应的按钮。
+                        latestRecordId?.let { recordId ->
+                            MiuixButton(
+                                label = "照上次",
+                                onClick = { onCopyLastVisit(recordId) },
+                                icon = Icons.Rounded.Replay,
+                                style = MiuixButtonStyle.Tonal,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
                 }
 
                 uiState.errorMessage?.let { message ->

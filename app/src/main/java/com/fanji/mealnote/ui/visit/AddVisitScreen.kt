@@ -86,6 +86,8 @@ import java.io.File
 @Composable
 fun AddVisitScreen(
     restaurantId: Long,
+    /** 「照上次再来一份」的来源记录；为 null 表示空白表单。 */
+    copyFromRecordId: Long?,
     onBack: () -> Unit,
     onSaved: () -> Unit,
     viewModel: AddVisitViewModel = hiltViewModel(),
@@ -98,7 +100,11 @@ fun AddVisitScreen(
     // 普通 remember 无法保存不可序列化的 File，重建后会丢失拍摄结果的关联。
     var pendingCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(restaurantId) { viewModel.setRestaurantId(restaurantId) }
+    // 顺序不能颠倒：setCopyFrom 需要先知道目标餐厅，才能校验来源记录是否属于同一家店。
+    LaunchedEffect(restaurantId, copyFromRecordId) {
+        viewModel.setRestaurantId(restaurantId)
+        viewModel.setCopyFrom(copyFromRecordId)
+    }
     LaunchedEffect(uiState.saved) { if (uiState.saved) onSaved() }
 
     val galleryPicker = rememberLauncherForActivityResult(

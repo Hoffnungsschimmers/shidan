@@ -94,11 +94,11 @@ Compose Screen → ViewModel → MealRepository → (MealDao | PhotoStore | Back
 
 ## 当前版本与交付
 
-- **v0.3.8**（versionCode 11）。功能已齐（花费、MIUIx 视觉、信息架构、玻璃、照片查看器、
-  统计、封面复用、深色模式、分享卡片、无障碍细化）。
-- 交付物在 `apk/`：`味笺-v0.3.8-release.apk`（已签名，2,045,727 B，
-  sha256 `7463d24b81704b7b854a9c3aeff582f66367909404ca7f306faae1db36de3d7a`）、
-  `味笺-v0.3.8-debug.apk`（18,883,829 B）。
+- **v0.3.9**（versionCode 12）。功能已齐（花费、MIUIx 视觉、信息架构、玻璃、照片查看器、
+  统计、封面复用、深色模式、分享卡片、无障碍细化、照上次再来一份）。
+- 交付物在 `apk/`：`味笺-v0.3.9-release.apk`（已签名，2,062,107 B，
+  sha256 `c66daaf8ed5910b819451c0134926788daaa7e59367a5993fe7b451c7d79d5df`）、
+  `味笺-v0.3.9-debug.apk`（18,900,209 B）。
 - 签名密钥库 `mealnote-release.jks`（项目根目录），凭据在 `local.properties`。
   `.gitignore` 已排除 `*.jks` / `local.properties` / `*.apk`。
   **密钥库是单点故障**：丢失后已安装用户无法覆盖升级。
@@ -186,9 +186,13 @@ CHANGELOG 中写明。
   「花费全识别不出时返回 `null` 而非 `0`」「排行榜次数相同时按 id 升序」——
   以后有人想「简化」掉这些行为，测试会拦下来。
 - 测试类清单（新增测试必须同时更新 `README.md` 里的 JDK 运行命令）：
-  `MealResultTest`、`ConvertersTest`、`FormattersTest`、`HomeFilterTest`、
-  `PendingPhotoCleanupConcurrencyTest`、`BackupEntryNameSafetyTest`、
-  `ReclaimableFormPhotosTest`、`FootprintAggregationTest`。
+  `MealResultTest`、`MealTextTest`、`ConvertersTest`、`FormattersTest`、`HomeFilterTest`、
+  `FootprintAggregationTest`、`PendingPhotoCleanupConcurrencyTest`、
+  `BackupEntryNameSafetyTest`、`ReclaimableFormPhotosTest`、`VisitPrefillTest`。
+- **把设计决策锁进测试**，而不只测计算结果。范例：
+  「花费全识别不出时返回 `null` 而非 `0`」、
+  「排行榜次数相同时按 id 升序」、
+  「`VisitPrefill` 的字段集合用反射断言，防止被加字段」。
 - **零覆盖的缺口**：`MealRepository` 与全部 ViewModel。要补需要
   Room 测试环境与协程测试调度器，且 `MealRepository` 是具体类不是接口，
   得先重构出接口或把纯逻辑继续往下抽。

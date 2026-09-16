@@ -79,14 +79,20 @@ class AddVisitViewModel @Inject constructor(
     /**
      * 本实例是否由系统回收后的状态恢复而来。
      *
-     * **必须在构造时求值**，不能写成函数留到 [onCleared] 再算。
-     * 下面 `init` 里的持久化逻辑会把 [KEY_NOTE] / [KEY_PHOTOS] 写回 `savedStateHandle`
+     * **必须在构造时求值，且必须声明在 `init` 之前**（属性初始化按声明顺序执行）：
+     * 下面 `init` 里的持久化逻辑会把这些 key 写回 `savedStateHandle`
      * （`Dispatchers.Main.immediate` + StateFlow 首帧同步发射，构造期间就会写入），
      * 之后再判断就**恒为 true** —— 早期版本正是如此，导致
      * 「放弃表单时回收未提交图片」这段逻辑从未真正执行，图片一直泄漏成孤儿文件。
+     *
+     * 「照上次再来一份」的预填同样依赖它：进程重建时表单里已经是用户改过的内容，
+     * 不能再被来源记录覆盖。
      */
     private val restoredFromSavedState: Boolean =
         savedStateHandle.contains(KEY_NOTE) || savedStateHandle.contains(KEY_PHOTOS)
+
+    /** 「照上次再来一份」的来源记录 id；null 表示空白表单。 */
+    private val copyFromRecordId = MutableStateFlow<Long?>(null)
 
     init {
         // 只持久化“用户输入”字段，并用 distinctUntilChanged 过滤加载态变化，
@@ -155,6 +161,46 @@ class AddVisitViewModel @Inject constructor(
         if (restaurantId.value != id) {
             restaurantId.value = id
             savedStateHandle[KEY_RESTAURANT_ID] = id
+        }
+    }
+
+    // ------------------------------------------------------ 照上次再来一份
+
+    /**
+     * 带入某次历史记录的内容，省去常客重复输入。
+     *
+     * 必须在 [setRestaurantId] 之后调用 —— 预填时要校验来源记录是否属于同一家店。
+     *
+     * @param recordId 来源记录；null 表示空白表单，不做任何预填。
+     */
+    fun setCopyFrom(recordId: Long?) {
+        if (recordId == null || copyFromRecordId.value == recordId) return
+        copyFromRecordId.value = recordId
+        viewModelScope.launch { prefillFrom(recordId) }
+    }
+
+    /**
+     * 预填「每次都差不多」的字段。
+     *
+     * 具体带入哪些字段、为什么，见 [VisitPrefill] 的说明。
+     */
+    private suspend fun prefillFrom(recordId: Long) {
+        // 进程重建时表单里已是用户改过的内容，不能被来源记录覆盖。
+        if (restoredFromSavedState) return
+
+        val targetRestaurantId = restaurantId.value ?: return
+        val source = repository.getDiningRecord(recordId)?.record
+        val prefill = prefillFromRecord(source, targetRestaurantId) ?: return
+
+        _uiState.update { state ->
+            state.copy(
+                verdict = prefill.verdict,
+                dishes = prefill.dishes,
+                priceText = prefill.priceText,
+                // 日期用「现在」：这是新的一次用餐，不是原来那次。
+                dateMillis = System.currentTimeMillis(),
+                errorMessage = null,
+            )
         }
     }
 

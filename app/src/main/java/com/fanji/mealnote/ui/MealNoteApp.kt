@@ -36,16 +36,28 @@ object Routes {
     /** 新建餐厅。[nextVisit] 为 true 时保存后直接进入用餐表单。 */
     const val ADD_RESTAURANT = "add_restaurant?nextVisit={nextVisit}"
     const val RESTAURANT_DETAIL = "restaurant/{restaurantId}"
-    const val ADD_VISIT = "restaurant/{restaurantId}/visit"
+
+    /**
+     * 新建用餐记录。
+     *
+     * [copyFrom] 为「照上次再来一份」的来源记录 id，`-1` 表示不带入任何内容。
+     * 用哨兵值而不是可空参数：Navigation 的可空 Long 实参在缺省值处理上很容易出错，
+     * 而这里「无来源」与「来源是某条记录」的区分只需要一个不会冲突的负数。
+     */
+    const val ADD_VISIT = "restaurant/{restaurantId}/visit?copyFrom={copyFrom}"
     const val EDIT_RESTAURANT = "restaurant/{restaurantId}/edit"
     const val EDIT_VISIT = "visit/{recordId}/edit"
     const val PICK_RESTAURANT = "pick_restaurant"
+
+    /** 「无来源记录」哨兵。记录 id 由数据库自增，恒为正数。 */
+    const val NO_COPY_SOURCE = -1L
 
     fun addRestaurant(nextVisit: Boolean = false): String = "add_restaurant?nextVisit=$nextVisit"
 
     fun restaurantDetail(restaurantId: Long): String = "restaurant/$restaurantId"
 
-    fun addVisit(restaurantId: Long): String = "restaurant/$restaurantId/visit"
+    fun addVisit(restaurantId: Long, copyFromRecordId: Long = NO_COPY_SOURCE): String =
+        "restaurant/$restaurantId/visit?copyFrom=$copyFromRecordId"
 
     fun editRestaurant(restaurantId: Long): String = "restaurant/$restaurantId/edit"
 
@@ -145,6 +157,9 @@ fun MealNoteApp() {
                 restaurantId = restaurantId,
                 onBack = { navController.popBackStack() },
                 onAddVisit = { navController.openVisitForm(restaurantId) },
+                onCopyLastVisit = { recordId ->
+                    navController.openVisitForm(restaurantId, copyFromRecordId = recordId)
+                },
                 onEditRestaurant = { navController.navigate(Routes.editRestaurant(restaurantId)) },
                 onEditVisit = { recordId -> navController.navigate(Routes.editVisit(recordId)) },
             )
@@ -152,11 +167,19 @@ fun MealNoteApp() {
 
         composable(
             route = Routes.ADD_VISIT,
-            arguments = listOf(navArgument("restaurantId") { type = NavType.LongType }),
+            arguments = listOf(
+                navArgument("restaurantId") { type = NavType.LongType },
+                navArgument("copyFrom") {
+                    type = NavType.LongType
+                    defaultValue = Routes.NO_COPY_SOURCE
+                },
+            ),
         ) { backStackEntry ->
             val restaurantId = backStackEntry.arguments?.getLong("restaurantId") ?: return@composable
+            val copyFrom = backStackEntry.arguments?.getLong("copyFrom") ?: Routes.NO_COPY_SOURCE
             AddVisitScreen(
                 restaurantId = restaurantId,
+                copyFromRecordId = copyFrom.takeIf { it != Routes.NO_COPY_SOURCE },
                 onBack = { navController.popBackStack() },
                 onSaved = { navController.backToDetail(restaurantId) },
             )
@@ -196,8 +219,11 @@ fun MealNoteApp() {
  * 如果各自保留中间的选店页/新建页，用户按返回键会退回到一个已经完成使命的中间页面。
  * 统一清到 [Routes.MAIN] 之后，返回键的行为在任何入口下都一致：退回主界面。
  */
-private fun NavHostController.openVisitForm(restaurantId: Long) {
-    navigate(Routes.addVisit(restaurantId)) {
+private fun NavHostController.openVisitForm(
+    restaurantId: Long,
+    copyFromRecordId: Long = Routes.NO_COPY_SOURCE,
+) {
+    navigate(Routes.addVisit(restaurantId, copyFromRecordId)) {
         popUpTo(Routes.MAIN) { inclusive = false }
     }
 }

@@ -131,6 +131,7 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
   com.fanji.mealnote.data.PendingPhotoCleanupConcurrencyTest \
   com.fanji.mealnote.data.backup.BackupEntryNameSafetyTest \
   com.fanji.mealnote.ui.edit.ReclaimableFormPhotosTest \
+  com.fanji.mealnote.ui.visit.VisitPrefillTest \
   com.fanji.mealnote.ui.home.FootprintAggregationTest
 ```
 
@@ -140,7 +141,7 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 
 | 检查项 | 状态 |
 |---|---|
-| `testDebugUnitTest` | 92 个用例全部通过（经 JDK 直接运行验证，见上方环境问题说明） |
+| `testDebugUnitTest` | 98 个用例全部通过（经 JDK 直接运行验证，见上方环境问题说明） |
 | `lintDebug` | 通过（0 错误） |
 | `assembleDebug` | 通过 |
 | `assembleRelease` | 通过（R8 混淆 + 资源裁剪，已签名） |
