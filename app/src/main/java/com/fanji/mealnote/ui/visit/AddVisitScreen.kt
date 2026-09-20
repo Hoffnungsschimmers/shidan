@@ -1,19 +1,10 @@
 package com.fanji.mealnote.ui.visit
 
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,26 +12,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Payments
 import androidx.compose.material.icons.rounded.RestaurantMenu
-import androidx.compose.material.icons.rounded.SentimentDissatisfied
-import androidx.compose.material.icons.rounded.SentimentNeutral
-import androidx.compose.material.icons.rounded.SentimentSatisfiedAlt
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,28 +31,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.fanji.mealnote.data.local.Verdict
-import com.fanji.mealnote.ui.components.CameraPhotoAction
-import com.fanji.mealnote.ui.components.GalleryPhotoAction
+import com.fanji.mealnote.ui.components.FormBottomGap
+import com.fanji.mealnote.ui.components.FormErrorLine
+import com.fanji.mealnote.ui.components.MealDateRow
+import com.fanji.mealnote.ui.components.MealPhotoSection
 import com.fanji.mealnote.ui.components.MiuixButton
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixTextField
 import com.fanji.mealnote.ui.components.MiuixTopBar
 import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.SectionHeader
-import com.fanji.mealnote.ui.components.SelectedPhoto
+import com.fanji.mealnote.ui.components.VerdictSelector
+import com.fanji.mealnote.ui.components.rememberGalleryPicker
 import com.fanji.mealnote.ui.components.rememberPhotoViewerState
-import com.fanji.mealnote.ui.displayName
-import com.fanji.mealnote.ui.formatMealDate
 import java.io.File
 
 /**
@@ -107,9 +82,9 @@ fun AddVisitScreen(
     }
     LaunchedEffect(uiState.saved) { if (uiState.saved) onSaved() }
 
-    val galleryPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickMultipleVisualMedia(maxItems = MAX_VISIT_PHOTOS),
-    ) { viewModel.onPhotosPicked(it) }
+    val galleryPicker = rememberGalleryPicker(maxItems = MAX_VISIT_PHOTOS) { uris ->
+        viewModel.onPhotosPicked(uris)
+    }
     val cameraPicker = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         val path = pendingCameraPath
         if (path != null) {
@@ -145,44 +120,10 @@ fun AddVisitScreen(
             }
 
             item {
-                MiuixCard(
+                MealDateRow(
+                    dateMillis = uiState.dateMillis,
                     onClick = { showDatePicker = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    elevation = 2.dp,
-                    contentPadding = PaddingValues(16.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(MaterialTheme.shapes.small)
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Rounded.CalendarMonth,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(19.dp),
-                            )
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("用餐日期", style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                uiState.dateMillis.formatMealDate(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Text(
-                            "修改",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
+                )
             }
 
             item {
@@ -215,53 +156,22 @@ fun AddVisitScreen(
             }
 
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SectionHeader(
-                        title = "照片",
-                        subtitle = "选填，最多 $MAX_VISIT_PHOTOS 张",
-                        trailing = {
-                            if (uiState.photoPaths.isNotEmpty()) {
-                                Text(
-                                    "${uiState.photoPaths.size} 张",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        },
-                    )
-                    if (uiState.isImportingPhotos) {
-                        Text(
-                            text = "正在导入图片…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        // 达到上限后隐藏添加入口，避免用户继续选择却无法保存。
-                        if (uiState.canAddPhoto) {
-                            item {
-                                GalleryPhotoAction(onClick = {
-                                    galleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                })
-                            }
-                            item {
-                                CameraPhotoAction(onClick = {
-                                    val (file, uri) = viewModel.createCameraTarget()
-                                    pendingCameraPath = file.absolutePath
-                                    cameraPicker.launch(uri)
-                                })
-                            }
-                        }
-                        itemsIndexed(uiState.photoPaths, key = { _, path -> path }) { index, path ->
-                            SelectedPhoto(
-                                path = path,
-                                contentDescription = "用餐照片（选填）",
-                                onRemove = { viewModel.removePhoto(index) },
-                                onPreview = { photoViewer.open(uiState.photoPaths, index) },
-                            )
-                        }
-                    }
-                }
+                MealPhotoSection(
+                    title = "照片",
+                    subtitle = "选填，最多 $MAX_VISIT_PHOTOS 张",
+                    photoPaths = uiState.photoPaths,
+                    photoDescription = "用餐照片（选填）",
+                    isImporting = uiState.isImportingPhotos,
+                    canAddPhoto = uiState.canAddPhoto,
+                    onGallery = { galleryPicker.launch() },
+                    onCamera = {
+                        val (file, uri) = viewModel.createCameraTarget()
+                        pendingCameraPath = file.absolutePath
+                        cameraPicker.launch(uri)
+                    },
+                    onRemove = viewModel::removePhoto,
+                    onPreview = { index -> photoViewer.open(uiState.photoPaths, index) },
+                )
             }
 
             item {
@@ -275,17 +185,9 @@ fun AddVisitScreen(
                 )
             }
 
-            uiState.errorMessage?.let { message ->
-                item {
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
+            item { FormErrorLine(message = uiState.errorMessage) }
 
-            item { Spacer(Modifier.height(4.dp)) }
+            item { FormBottomGap() }
         }
 
         MiuixButton(
@@ -317,91 +219,4 @@ fun AddVisitScreen(
     }
 
     PhotoViewerHost(photoViewer)
-}
-
-/**
- * 三选一评价选择器。
- *
- * 选中项的变化有三个同时发生的动画：底色渐变、边框渐显、以及轻微的放大。
- * 之所以不用「选中就打勾」，是因为评价是一个**程度**而非开关 ——
- * 三张卡片并排、选中者浮起，能更直观地传达「在三档里选了这一档」。
- */
-@Composable
-private fun VerdictSelector(selected: Verdict, onSelect: (Verdict) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().selectableGroup(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        VerdictOption(Verdict.GOOD, Icons.Rounded.SentimentSatisfiedAlt, selected == Verdict.GOOD, Modifier.weight(1f)) { onSelect(Verdict.GOOD) }
-        VerdictOption(Verdict.MEH, Icons.Rounded.SentimentNeutral, selected == Verdict.MEH, Modifier.weight(1f)) { onSelect(Verdict.MEH) }
-        VerdictOption(Verdict.BAD, Icons.Rounded.SentimentDissatisfied, selected == Verdict.BAD, Modifier.weight(1f)) { onSelect(Verdict.BAD) }
-    }
-}
-
-@Composable
-private fun VerdictOption(
-    verdict: Verdict,
-    icon: ImageVector,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val container = when (verdict) {
-        Verdict.GOOD -> MaterialTheme.colorScheme.primaryContainer
-        Verdict.MEH -> MaterialTheme.colorScheme.tertiaryContainer
-        Verdict.BAD -> MaterialTheme.colorScheme.errorContainer
-    }
-    val contentColor = when (verdict) {
-        Verdict.GOOD -> MaterialTheme.colorScheme.onPrimaryContainer
-        Verdict.MEH -> MaterialTheme.colorScheme.onTertiaryContainer
-        Verdict.BAD -> MaterialTheme.colorScheme.onErrorContainer
-    }
-    val accent = when (verdict) {
-        Verdict.GOOD -> MaterialTheme.colorScheme.primary
-        Verdict.MEH -> MaterialTheme.colorScheme.tertiary
-        Verdict.BAD -> MaterialTheme.colorScheme.error
-    }
-
-    val background by animateColorAsState(
-        targetValue = if (selected) container else MaterialTheme.colorScheme.surface,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "verdictBg",
-    )
-    val foreground by animateColorAsState(
-        targetValue = if (selected) contentColor else MaterialTheme.colorScheme.onSurfaceVariant,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "verdictFg",
-    )
-    val borderColor by animateColorAsState(
-        targetValue = if (selected) accent else MaterialTheme.colorScheme.outlineVariant,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "verdictBorder",
-    )
-    val scale by animateFloatAsState(
-        targetValue = if (selected) 1f else 0.97f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "verdictScale",
-    )
-
-    Box(
-        modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(MaterialTheme.shapes.medium)
-            .background(background)
-            .border(if (selected) 1.5.dp else 1.dp, borderColor, MaterialTheme.shapes.medium)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
-            .padding(vertical = 18.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Icon(icon, contentDescription = null, tint = foreground, modifier = Modifier.size(26.dp))
-            Text(verdict.displayName(), style = MaterialTheme.typography.labelLarge, color = foreground)
-        }
-    }
 }

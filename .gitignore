@@ -2,6 +2,8 @@
 .gradle/
 .idea/
 .kotlin/
+.mimosa/
+**/.mimosa/
 build/
 local.properties
 captures/

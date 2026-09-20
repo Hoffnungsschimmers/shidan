@@ -8,6 +8,7 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.PhotoStore
+import com.fanji.mealnote.data.log.AppLog
 import com.fanji.mealnote.data.local.Verdict
 import com.fanji.mealnote.ui.visit.MAX_VISIT_PHOTOS
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -54,6 +55,7 @@ data class EditVisitUiState(
 class EditVisitViewModel @Inject constructor(
     private val repository: MealRepository,
     private val photoStore: PhotoStore,
+    private val appLog: AppLog,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
     private val recordId = MutableStateFlow(savedStateHandle.get<Long>(KEY_RECORD_ID))
@@ -120,7 +122,9 @@ class EditVisitViewModel @Inject constructor(
 
     /** 注入路由参数并加载现有记录。进程重建时保留用户已输入的内容。 */
     fun setRecordId(id: Long) {
-        if (recordId.value == id) return
+        // 进程重建后 recordId 已从 SavedStateHandle 恢复，与传入 id 相等，
+        // 但数据尚未加载，此时必须继续走 load，否则页面永远停在加载中。
+        if (recordId.value == id && !_uiState.value.isLoading) return
         recordId.value = id
         savedStateHandle[KEY_RECORD_ID] = id
         viewModelScope.launch { load(id) }
@@ -134,9 +138,12 @@ class EditVisitViewModel @Inject constructor(
         }
         val orderedPaths = existing.photos.sortedBy { it.sortOrder }.map { it.filePath }
         val restaurantName = repository.getRestaurant(existing.record.restaurantId)?.name.orEmpty()
-        val restored = savedStateHandle.contains(KEY_DISHES) || savedStateHandle.contains(KEY_PHOTOS)
+        // 必须用构造时捕获的 [restoredFromSavedState]，不能在这里查
+        // `savedStateHandle.contains(...)`：`init` 的持久化协程在构造期间就会把
+        // 空表单写回 handle，此后该判断恒为 true，导致正常进入编辑页也走
+        // “保留用户输入”分支，表单永远是空白。
         _uiState.update { state ->
-            if (restored) {
+            if (restoredFromSavedState) {
                 state.copy(
                     isLoading = false,
                     restaurantName = restaurantName,
@@ -182,13 +189,16 @@ class EditVisitViewModel @Inject constructor(
                 _uiState.update { it.copy(isImportingPhotos = false, errorMessage = PHOTO_LIMIT_REACHED) }
                 return@launch
             }
-            val imported = photoStore.importUris(uris.take(remaining))
+            val (imported, failure) = photoStore.importUrisWithReason(uris.take(remaining))
             _uiState.update { state ->
                 state.copy(
                     photoPaths = (state.photoPaths + imported).distinct().take(MAX_VISIT_PHOTOS),
                     isImportingPhotos = false,
-                    errorMessage = if (imported.isEmpty()) IMPORT_FAILED else null,
+                    errorMessage = if (imported.isEmpty()) failure.toImportMessage() else null,
                 )
+            }
+            if (imported.isEmpty()) {
+                appLog.warn("visit", "import failed failure=$failure count=${uris.size}")
             }
         }
     }
@@ -286,7 +296,6 @@ class EditVisitViewModel @Inject constructor(
 
     private companion object {
         const val PHOTO_LIMIT_REACHED = "最多可添加 $MAX_VISIT_PHOTOS 张图片"
-        const val IMPORT_FAILED = "图片导入失败，请重新选择"
         const val KEY_RECORD_ID = "edit_visit_record_id"
         const val KEY_DATE = "edit_visit_date"
         const val KEY_VERDICT = "edit_visit_verdict"
@@ -295,4 +304,10 @@ class EditVisitViewModel @Inject constructor(
         const val KEY_NOTE = "edit_visit_note"
         const val KEY_PHOTOS = "edit_visit_photos"
     }
+}
+
+/** 导入失败原因的用户文案，见 AddRestaurantViewModel 处的同名函数说明。 */
+private fun PhotoStore.ImportFailure?.toImportMessage(): String = when (this) {
+    PhotoStore.ImportFailure.NOT_AN_IMAGE -> "所选文件不是有效的图片，请换一张重试"
+    else -> "图片导入失败，请重新选择"
 }

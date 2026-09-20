@@ -8,6 +8,7 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.PhotoStore
+import com.fanji.mealnote.data.log.AppLog
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,6 +55,7 @@ data class AddRestaurantUiState(
 class AddRestaurantViewModel @Inject constructor(
     private val repository: MealRepository,
     private val photoStore: PhotoStore,
+    private val appLog: AppLog,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
@@ -113,26 +115,35 @@ class AddRestaurantViewModel @Inject constructor(
         _uiState.update { it.copy(address = value, errorMessage = null) }
 
     /**
-     * 导入相册选择结果。封面只保留一张，新图替换旧图时立即回收旧文件。
+     * 导入相册选择结果。封面只保留一张，新图替换旧图时回收旧文件。
+     *
+     * 注意删除必须发生在状态更新**之后**（把 IO 移出 `update` lambda），
+     * 且不能读取 `update` lambda 的参数做删除：该 lambda 可能被重复执行，
+     * 在其中做磁盘 IO 会阻塞主线程并导致同一文件被删除多次（见 [onCameraPhoto]）。
      */
     fun onPhotosPicked(uris: List<Uri>) {
         if (uris.isEmpty()) return
         viewModelScope.launch {
             _uiState.update { it.copy(isImportingPhotos = true, errorMessage = null) }
-            val imported = photoStore.importUris(uris.take(1))
+            val (imported, failure) = photoStore.importUrisWithReason(uris.take(1))
             val newCover = imported.lastOrNull()
+            val obsolete = _uiState.value.photoPaths.filterNot { it == newCover }
             _uiState.update { state ->
                 if (newCover == null) {
-                    state.copy(isImportingPhotos = false, errorMessage = IMPORT_FAILED)
+                    state.copy(isImportingPhotos = false, errorMessage = failure.toImportMessage())
                 } else {
-                    // 只删除“被替换掉的旧图”，避免误删刚导入的新文件。
-                    val obsolete = state.photoPaths.filterNot { it == newCover }
                     state.copy(
                         photoPaths = listOf(newCover),
                         isImportingPhotos = false,
                         errorMessage = null,
-                    ).also { photoStore.deleteOwnedPhotos(obsolete) }
+                    )
                 }
+            }
+            if (newCover == null) {
+                appLog.warn("cover", "import failed failure=$failure count=${uris.size}")
+            }
+            if (obsolete.isNotEmpty()) {
+                photoStore.deleteOwnedPhotos(obsolete)
             }
         }
     }
@@ -231,9 +242,19 @@ class AddRestaurantViewModel @Inject constructor(
     }
 
     private companion object {
-        const val IMPORT_FAILED = "图片导入失败，请重新选择"
         const val KEY_NAME = "add_name"
         const val KEY_ADDRESS = "add_address"
         const val KEY_PHOTOS = "add_photos"
     }
+}
+
+/**
+ * 导入失败原因的用户文案。
+ *
+ * 区分“读不出来”与“不是图片”：前者通常是来源应用的授权问题，换个相册重选即可；
+ * 后者是选错了文件类型，用户需要换一张图。
+ */
+private fun PhotoStore.ImportFailure?.toImportMessage(): String = when (this) {
+    PhotoStore.ImportFailure.NOT_AN_IMAGE -> "所选文件不是有效的图片，请换一张重试"
+    else -> "图片导入失败，请重新选择"
 }

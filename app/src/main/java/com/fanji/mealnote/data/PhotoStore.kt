@@ -7,6 +7,8 @@ import android.graphics.Matrix
 import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
+import com.fanji.mealnote.data.log.AppLog
+import com.fanji.mealnote.data.log.describeForLog
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -30,6 +32,7 @@ import javax.inject.Singleton
 @Singleton
 class PhotoStore @Inject constructor(
     @param:ApplicationContext private val context: Context,
+    private val appLog: AppLog,
 ) {
     /** 复制成功后写回数据库的最大边长（像素）。超大图会先降采样再存储。 */
     private companion object {
@@ -37,6 +40,9 @@ class PhotoStore @Inject constructor(
         const val JPEG_QUALITY = 88
         const val PHOTO_DIR_NAME = "photos"
         const val TEMP_PREFIX = "photo_"
+
+        /** 原始字节直拷的上限：超过此体积的原图拒绝直拷，避免单张耗尽存储。 */
+        const val MAX_RAW_COPY_BYTES = 32L * 1024 * 1024
 
         /**
          * 孤儿文件的最小存活时长。早于该时长的文件视为“可能正在被使用”，不参与清理，
@@ -53,10 +59,46 @@ class PhotoStore @Inject constructor(
      *
      * 导入过程中会按 [MAX_IMAGE_EDGE_PX] 降采样并校正 EXIF 方向，避免把手机原图
      * （常见 8~12MB）原样复制进私有目录造成存储膨胀。
+     *
+     * 两阶段策略：先尝试解码降采样；解码失败（如特殊编码、ROM 解码器缺失）时
+     * 退回原始字节直拷，保证图片至少能存下来，只是体积大一些。
+     * 两种路径的成败都会记入应用日志，便于排查“导入失败”。
      */
     suspend fun importUris(uris: List<Uri>): List<String> = withContext(Dispatchers.IO) {
         uris.mapNotNull { uri -> importSingle(uri) }
     }
+
+    /** 单张导入的失败原因，供调用方给用户准确提示。 */
+    enum class ImportFailure {
+        /** 解码与直拷都失败，文件确实读不出来。 */
+        UNREADABLE,
+
+        /** 读出来了但不是有效图片（如文本文件改扩展名）。 */
+        NOT_AN_IMAGE,
+    }
+
+    /**
+     * 带失败原因的批量导入。
+     *
+     * 旧式文档选择器可能返回各种来源的 URI，失败原因各异：
+     * 返回 Pair（成功路径列表，首个失败原因），调用方据此给用户准确提示，
+     * 而不是一律“导入失败”。
+     */
+    suspend fun importUrisWithReason(uris: List<Uri>): Pair<List<String>, ImportFailure?> =
+        withContext(Dispatchers.IO) {
+            val ok = mutableListOf<String>()
+            var firstFailure: ImportFailure? = null
+            uris.forEach { uri ->
+                val result = importSingleInner(uri)
+                appLog.writeLine(result.logLine)
+                if (result.path != null) {
+                    ok += result.path
+                } else if (firstFailure == null) {
+                    firstFailure = result.failure
+                }
+            }
+            ok to firstFailure
+        }
 
     /**
      * 把已存在于磁盘上的图片文件复制进私有照片目录。
@@ -165,22 +207,123 @@ class PhotoStore @Inject constructor(
     }
 
     /** 复制单个 URI 到私有目录；任何失败都会清理半成品文件并返回 null。 */
-    private fun importSingle(uri: Uri): String? {
+    private suspend fun importSingle(uri: Uri): String? {
+        val result = importSingleInner(uri)
+        appLog.writeLine(result.logLine)
+        return result.path
+    }
+
+    /**
+     * 单张导入结果。`failure` 为空表示成功；`logLine` 为已格式化的日志行，
+     * 由调用方统一写入，避免在同步上下文中处理挂起函数。
+     */
+    private data class SingleImport(
+        val path: String?,
+        val failure: ImportFailure?,
+        val logLine: String,
+    )
+
+    /**
+     * 单张导入：解码降采样优先，失败时退回原始字节直拷。
+     *
+     * 直拷路径不经过 Bitmap，因此 ROM 解码器缺失、特殊编码（HEIC/AVIF 在旧设备上）
+     * 导致的解码失败仍有机会存下原图。直拷后会做一次轻量有效性校验
+     * （文件头是否为常见图片格式），避免把文本文件当照片存进来。
+     */
+    private fun importSingleInner(uri: Uri): SingleImport {
+        val label = uri.describeForLog()
         var destination: File? = null
         var bitmap: Bitmap? = null
-        return try {
+        try {
             val target = createPhotoFile().also { destination = it }
-            bitmap = decodeDownsampled(uri) ?: throw IOException("Failed to decode $uri")
-            writeBitmap(bitmap, target)
-            target.absolutePath
-        } catch (_: Exception) {
-            // 解码或写盘失败：删除可能已创建的半成品文件，避免留下孤儿文件。
+            bitmap = decodeDownsampled(uri)
+            if (bitmap != null) {
+                writeBitmap(bitmap, target)
+                return SingleImport(
+                    target.absolutePath, null,
+                    "I/import: decode ok source=$label size=${target.length()}",
+                )
+            }
+            // 解码失败：退回原始字节直拷。
+            val copied = copyRawBytes(uri, target)
+            if (copied && isImageFile(target)) {
+                return SingleImport(
+                    target.absolutePath, null,
+                    "I/import: decode failed, raw-copy ok source=$label size=${target.length()}",
+                )
+            }
             destination?.delete()
-            null
+            destination = null
+            val reason = if (copied) ImportFailure.NOT_AN_IMAGE else ImportFailure.UNREADABLE
+            return SingleImport(null, reason, "W/import: failed source=$label reason=$reason")
+        } catch (error: Exception) {
+            destination?.delete()
+            return SingleImport(
+                null, ImportFailure.UNREADABLE,
+                "W/import: failed source=$label reason=UNREADABLE error=${error.javaClass.simpleName}",
+            )
         } finally {
-            // 无论成功或失败都必须回收位图。旋转后的新对象与原始对象可能是同一个实例，
-            // recycle 对已回收对象是幂等的，此处只负责兜底释放。
             bitmap?.recycle()
+        }
+    }
+
+    /** 不经过解码，直接把 URI 的字节流拷入目标文件。 */
+    private fun copyRawBytes(uri: Uri, target: File): Boolean {
+        return try {
+            var bytes = 0L
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output ->
+                    val buf = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buf)
+                        if (read < 0) break
+                        if (read == 0) continue
+                        bytes += read
+                        if (bytes > MAX_RAW_COPY_BYTES) return false
+                        output.write(buf, 0, read)
+                    }
+                }
+            } ?: return false
+            bytes > 0
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 轻量图片有效性校验：只读文件头魔数。
+     *
+     * 覆盖 JPEG / PNG / WEBP / HEIC(brand) / GIF / BMP。直拷路径跳过了 Bitmap 解码，
+     * 若不校验，用户误选文本文件也会被当成照片存下来，之后列表里显示破图。
+     */
+    private fun isImageFile(file: File): Boolean {
+        return try {
+            val head = ByteArray(12)
+            file.inputStream().use { input ->
+                var filled = 0
+                while (filled < head.size) {
+                    val read = input.read(head, filled, head.size - filled)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    filled += read
+                }
+                if (filled < 4) return false
+            }
+            val jpeg = head[0] == 0xFF.toByte() && head[1] == 0xD8.toByte()
+            val png = head[0] == 0x89.toByte() && head[1] == 0x50.toByte() &&
+                head[2] == 0x4E.toByte() && head[3] == 0x47.toByte()
+            val gif = head[0] == 0x47.toByte() && head[1] == 0x49.toByte() && head[2] == 0x46.toByte()
+            val bmp = head[0] == 0x42.toByte() && head[1] == 0x4D.toByte()
+            val riffWebp = head[0] == 0x52.toByte() && head[1] == 0x49.toByte() &&
+                head[2] == 0x46.toByte() && head[3] == 0x46.toByte()
+            // ftyp box：HEIC / HEIF / AVIF / MP4 容器。MP4 会被误放行，
+            // 但它至少是媒体文件而非文本；相册里选到视频的概率远低于文本，
+            // 且后续解码展示失败时 Coil 会显示占位而非崩溃。
+            val ftyp = head.size >= 12 && head[4] == 0x66.toByte() && head[5] == 0x74.toByte() &&
+                head[6] == 0x79.toByte() && head[7] == 0x70.toByte()
+            jpeg || png || gif || bmp || riffWebp || ftyp
+        } catch (_: Exception) {
+            false
         }
     }
 

@@ -1,5 +1,6 @@
 package com.fanji.mealnote.ui.settings
 
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -16,12 +17,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -33,10 +36,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fanji.mealnote.BuildConfig
+import com.fanji.mealnote.data.backup.BackupFormat
 import com.fanji.mealnote.data.settings.ThemeMode
 import com.fanji.mealnote.ui.components.ConfirmDialog
 import com.fanji.mealnote.ui.components.MessageBanner
@@ -62,6 +68,7 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     // 导出：CreateDocument 让用户自选保存位置，返回的 URI 由 SAF 授予写权限，
     // 因此无需申请任何存储权限。
@@ -135,6 +142,29 @@ fun SettingsScreen(
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         SectionHeader(
+                            title = "流畅模式",
+                            subtitle = "关闭后动画与玻璃模糊降级，低端机更流畅",
+                        )
+                        MiuixCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            elevation = 2.dp,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                        ) {
+                            val fluid by viewModel.fluidMotion.collectAsStateWithLifecycle()
+                            MiuixListRow(
+                                icon = Icons.Rounded.Speed,
+                                title = "完整动效与实时模糊",
+                                subtitle = if (fluid) "已开启" else "已关闭，界面更省电",
+                                trailingText = if (fluid) "开" else "关",
+                                onClick = { viewModel.setFluidMotion(!fluid) },
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        SectionHeader(
                             title = "备份与恢复",
                             subtitle = "导出 ZIP 备份包，换机或重装后可完整恢复",
                         )
@@ -167,6 +197,14 @@ fun SettingsScreen(
                 }
 
                 item {
+                    WebDavSection(
+                        enabled = !uiState.isBusy,
+                        onUpload = viewModel::uploadToWebDav,
+                        onDownload = viewModel::downloadFromWebDav,
+                    )
+                }
+
+                item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         SectionHeader(title = "存储占用")
                         MiuixCard(
@@ -188,8 +226,8 @@ fun SettingsScreen(
                                 Column(Modifier.weight(1f)) {
                                     Text("照片与封面", style = MaterialTheme.typography.titleMedium)
                                     Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        "保存在应用私有目录，不会上传",
+                                Text(
+                                        "保存在应用私有目录，仅同步时上传到你自己的服务器",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -240,7 +278,7 @@ fun SettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         SectionHeader(title = "关于")
                         Text(
-                            text = "味笺是一款本地优先的个人餐厅收藏与用餐记录应用。\n所有数据只保存在这台设备上，不联网、不上传。",
+                            text = "味笺是一款本地优先的个人餐厅收藏与用餐记录应用。\n所有数据默认只保存在这台设备上；仅在使用服务器同步时连接你自己的服务器。",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -254,9 +292,35 @@ fun SettingsScreen(
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                "版本 $APP_VERSION · 备份格式 v$BACKUP_FORMAT_VERSION",
+                                "版本 ${BuildConfig.VERSION_NAME} · 备份格式 v${BackupFormat.FORMAT_VERSION}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        SectionHeader(
+                            title = "运行日志",
+                            subtitle = "遇到问题时导出，发给开发者定位",
+                        )
+                        MiuixCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            elevation = 2.dp,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                        ) {
+                            MiuixListRow(
+                                icon = Icons.Rounded.BugReport,
+                                title = "导出运行日志",
+                                subtitle = if (uiState.isLoading) {
+                                    "正在统计…"
+                                } else {
+                                    "约 ${uiState.logBytes.formatStorageSize()}，只含事件不含隐私内容"
+                                },
+                                enabled = !uiState.isBusy && !uiState.isLoading,
+                                onClick = viewModel::shareLog,
                             )
                         }
                     }
@@ -307,6 +371,18 @@ fun SettingsScreen(
             onDismiss = viewModel::cancelClearData,
         )
     }
+
+    // 日志分享：文本经 chooser 发给微信/邮件等，消费后复位避免重复弹出。
+    LaunchedEffect(uiState.pendingLogText) {
+        val text = uiState.pendingLogText ?: return@LaunchedEffect
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "味笺运行日志")
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        context.startActivity(Intent.createChooser(send, "导出运行日志"))
+        viewModel.consumeLogText()
+    }
 }
 
 /**
@@ -335,12 +411,6 @@ private fun ThemeMode.label(): String = when (this) {
     ThemeMode.LIGHT -> "浅色"
     ThemeMode.DARK -> "深色"
 }
-
-/** 与 `BuildConfig` 保持一致的应用版本；集中在此便于随版本号一起更新。 */
-private const val APP_VERSION = "0.3.9"
-
-/** 与 `BackupFormat.FORMAT_VERSION` 保持一致，用于在界面上告知用户备份格式世代。 */
-private const val BACKUP_FORMAT_VERSION = 1
 
 private const val MESSAGE_DURATION_MS = 4_000L
 

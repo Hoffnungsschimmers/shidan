@@ -117,9 +117,13 @@ fun ShareCardSheet(
                             scope.launch {
                                 // toImageBitmap 是挂起函数：它要等渲染管线把当前帧处理完，
                                 // 才能从图层里取出像素。
-                                val bitmap = layer.toImageBitmap().asAndroidBitmap()
-                                isCapturing = false
-                                onShare(bitmap)
+                                // finally 复位：若录制抛异常，按钮不能永远卡在“处理中”。
+                                try {
+                                    val bitmap = layer.toImageBitmap().asAndroidBitmap()
+                                    onShare(bitmap)
+                                } finally {
+                                    isCapturing = false
+                                }
                             }
                         }
                     },

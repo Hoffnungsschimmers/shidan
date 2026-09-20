@@ -8,6 +8,7 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.PhotoStore
+import com.fanji.mealnote.data.log.AppLog
 import com.fanji.mealnote.data.local.Verdict
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -58,6 +59,7 @@ data class AddVisitUiState(
 class AddVisitViewModel @Inject constructor(
     private val repository: MealRepository,
     private val photoStore: PhotoStore,
+    private val appLog: AppLog,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
     private val restaurantId = MutableStateFlow(savedStateHandle.get<Long>(KEY_RESTAURANT_ID))
@@ -233,13 +235,16 @@ class AddVisitViewModel @Inject constructor(
                 _uiState.update { it.copy(isImportingPhotos = false, errorMessage = PHOTO_LIMIT_REACHED) }
                 return@launch
             }
-            val imported = photoStore.importUris(uris.take(remaining))
+            val (imported, failure) = photoStore.importUrisWithReason(uris.take(remaining))
             _uiState.update { state ->
                 state.copy(
                     photoPaths = (state.photoPaths + imported).distinct().take(MAX_VISIT_PHOTOS),
                     isImportingPhotos = false,
-                    errorMessage = if (imported.isEmpty()) IMPORT_FAILED else null,
+                    errorMessage = if (imported.isEmpty()) failure.toImportMessage() else null,
                 )
+            }
+            if (imported.isEmpty()) {
+                appLog.warn("visit", "import failed failure=$failure count=${uris.size}")
             }
         }
     }
@@ -344,7 +349,6 @@ class AddVisitViewModel @Inject constructor(
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L
         const val PHOTO_LIMIT_REACHED = "最多可添加 $MAX_VISIT_PHOTOS 张图片"
-        const val IMPORT_FAILED = "图片导入失败，请重新选择"
         const val KEY_RESTAURANT_ID = "visit_restaurant_id"
         const val KEY_DATE = "visit_date"
         const val KEY_VERDICT = "visit_verdict"
@@ -353,4 +357,12 @@ class AddVisitViewModel @Inject constructor(
         const val KEY_NOTE = "visit_note"
         const val KEY_PHOTOS = "visit_photos"
     }
+}
+
+/**
+ * 导入失败原因的用户文案，见 AddRestaurantViewModel 处的同名函数说明。
+ */
+private fun PhotoStore.ImportFailure?.toImportMessage(): String = when (this) {
+    PhotoStore.ImportFailure.NOT_AN_IMAGE -> "所选文件不是有效的图片，请换一张重试"
+    else -> "图片导入失败，请重新选择"
 }

@@ -7,8 +7,13 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.backup.BackupStore
+import com.fanji.mealnote.data.log.AppLog
+import com.fanji.mealnote.data.settings.MotionPreference
 import com.fanji.mealnote.data.settings.ThemeMode
 import com.fanji.mealnote.data.settings.ThemePreference
+import com.fanji.mealnote.data.webdav.WebDavConfig
+import com.fanji.mealnote.data.webdav.WebDavPreference
+import com.fanji.mealnote.data.webdav.WebDavStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +33,7 @@ data class SettingsUiState(
     val isLoading: Boolean = true,
     val storageBytes: Long = 0L,
     val restaurantCount: Int = 0,
+    val logBytes: Long = 0L,
     val isBusy: Boolean = false,
     val busyLabel: String? = null,
     val message: String? = null,
@@ -35,6 +41,8 @@ data class SettingsUiState(
     /** 待确认的导入文件；非空时界面展示“将覆盖现有数据”的确认对话框。 */
     val pendingImportUri: Uri? = null,
     val showClearDataDialog: Boolean = false,
+    /** 待分享的日志文本；非空时界面发起系统分享，消费后复位。 */
+    val pendingLogText: String? = null,
 ) {
     /** 无数据时禁用导出与清空，避免产生空备份或误触。 */
     val canExport: Boolean get() = !isBusy && !isLoading && restaurantCount > 0
@@ -45,6 +53,10 @@ class SettingsViewModel @Inject constructor(
     private val repository: MealRepository,
     private val backupStore: BackupStore,
     private val themePreference: ThemePreference,
+    private val motionPreference: MotionPreference,
+    private val webDavPreference: WebDavPreference,
+    private val webDavStore: WebDavStore,
+    private val appLog: AppLog,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
@@ -61,6 +73,17 @@ class SettingsViewModel @Inject constructor(
     /** 切换主题。写入是同步的，界面会立刻反映，无需等待。 */
     fun setThemeMode(value: ThemeMode) = themePreference.setMode(value)
 
+    /**
+     * 流畅模式。
+     *
+     * 与主题一样直接暴露偏好的 Flow：这是全局渲染开关，复制进页面状态
+     * 会让开关与实际渲染有机会不一致。
+     */
+    val fluidMotion: StateFlow<Boolean> = motionPreference.fluid
+
+    /** 切换流畅模式，立即生效，下次启动保持。 */
+    fun setFluidMotion(value: Boolean) = motionPreference.setFluid(value)
+
     init {
         refreshStats()
     }
@@ -70,10 +93,19 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             // 存储统计涉及磁盘目录遍历，必须切到 IO 线程，不能占用主线程。
             val stats = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                repository.photoDirectorySizeBytes() to repository.getRestaurantsForBackup().size
+                Triple(
+                    repository.photoDirectorySizeBytes(),
+                    repository.getRestaurantsForBackup().size,
+                    appLog.sizeBytes(),
+                )
             }
             _uiState.update {
-                it.copy(isLoading = false, storageBytes = stats.first, restaurantCount = stats.second)
+                it.copy(
+                    isLoading = false,
+                    storageBytes = stats.first,
+                    restaurantCount = stats.second,
+                    logBytes = stats.third,
+                )
             }
         }
     }
@@ -232,6 +264,106 @@ class SettingsViewModel @Inject constructor(
     fun consumeMessage() = _uiState.update { it.copy(message = null) }
 
     fun consumeError() = _uiState.update { it.copy(errorMessage = null) }
+
+    // ------------------------------------------------------------ 运行日志
+
+    /**
+     * 导出运行日志并交给系统分享。
+     *
+     * 日志只含事件与脱敏后的来源，不含店名、备注等隐私内容（见 `AppLog`），
+     * 用户可直接把分享出去的文本发给开发者定位问题。
+     */
+    fun shareLog() {
+        val snapshot = _uiState.updateAndGet { state ->
+            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在准备日志…", message = null, errorMessage = null)
+        }
+        if (!snapshot.isBusy) return
+
+        viewModelScope.launch {
+            val text = appLog.exportText()
+            _uiState.update {
+                it.copy(isBusy = false, busyLabel = null, pendingLogText = text)
+            }
+        }
+    }
+
+    /** 界面已发起分享，复位一次性事件，避免返回本页重复弹出。 */
+    fun consumeLogText() = _uiState.update { it.copy(pendingLogText = null) }
+
+    // ------------------------------------------------------------ WebDAV 同步
+
+    /** WebDAV 配置，界面直接订阅，保存后即时生效。 */
+    val webDavConfig: StateFlow<WebDavConfig> = webDavPreference.config
+
+    /** 保存 WebDAV 配置（地址、账号、密码、远端文件名）。 */
+    fun saveWebDavConfig(value: WebDavConfig) {
+        webDavPreference.save(value)
+        _uiState.update { it.copy(message = "已保存同步配置", errorMessage = null) }
+    }
+
+    /** 上传当前全部数据到 WebDAV（覆盖远端同名文件）。 */
+    fun uploadToWebDav() {
+        val snapshot = _uiState.updateAndGet { state ->
+            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在上传…", message = null, errorMessage = null)
+        }
+        if (!snapshot.isBusy) return
+
+        viewModelScope.launch {
+            when (val result = webDavStore.upload()) {
+                is MealResult.Success -> {
+                    val summary = result.value
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyLabel = null,
+                            message = "已上传 ${summary.restaurantCount} 家餐厅、${summary.recordCount} 条用餐记录、${summary.photoCount} 张照片",
+                        )
+                    }
+                }
+
+                is MealResult.Failure -> _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("上传失败"))
+                }
+            }
+        }
+    }
+
+    /**
+     * 从 WebDAV 下载备份并恢复。
+     *
+     * 与手动导入**同一语义**：全量替换本地数据。调用前界面必须二次确认，
+     * 复用 `pendingImportUri` 的确认框机制太绕，这里由调用方在界面层弹框，
+     * 本方法只执行下载与恢复。
+     */
+    fun downloadFromWebDav() {
+        val snapshot = _uiState.updateAndGet { state ->
+            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在下载…", message = null, errorMessage = null)
+        }
+        if (!snapshot.isBusy) return
+
+        viewModelScope.launch {
+            when (val result = webDavStore.downloadAndRestore()) {
+                is MealResult.Success -> {
+                    val summary = result.value
+                    _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyLabel = null,
+                            message = "已恢复 ${summary.restaurantCount} 家餐厅、${summary.recordCount} 条用餐记录、${summary.photoCount} 张照片",
+                        )
+                    }
+                    refreshStats()
+                }
+
+                is MealResult.Failure -> {
+                    _uiState.update {
+                        it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("下载失败"))
+                    }
+                    refreshStats()
+                }
+            }
+        }
+    }
 
     private fun MealError.toMessage(prefix: String): String = when (this) {
         is MealError.InvalidInput -> reason

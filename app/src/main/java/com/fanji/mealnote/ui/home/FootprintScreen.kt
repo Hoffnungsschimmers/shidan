@@ -1,5 +1,6 @@
 package com.fanji.mealnote.ui.home
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,16 +21,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Restaurant
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,10 +47,15 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.fanji.mealnote.ui.components.AnimatedCounter
+import com.fanji.mealnote.ui.components.EmptyStateBlock
+import com.fanji.mealnote.ui.components.LoadingBlock
+import com.fanji.mealnote.ui.components.MealSearchField
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixSegmented
+import com.fanji.mealnote.ui.components.PageHeader
 import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.VerdictBadge
+import com.fanji.mealnote.ui.components.isFluidMotion
 import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import com.fanji.mealnote.ui.components.staggeredEnter
 import com.fanji.mealnote.ui.formatDayLabel
@@ -69,6 +68,7 @@ import java.io.File
  * 相比上一版（用餐记录只能在餐厅详情页里看到），这里把「吃」这件事本身
  * 提升为一等公民：按月份分组、按时间倒序，一眼能看到最近吃了什么、评价如何。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FootprintScreen(
     onOpenRestaurant: (Long) -> Unit,
@@ -76,6 +76,7 @@ fun FootprintScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val photoViewer = rememberPhotoViewerState()
+    val fluid = isFluidMotion
     var tab by rememberSaveable { mutableStateOf(FootprintTab.TIMELINE) }
 
     Box(Modifier.fillMaxSize()) {
@@ -90,21 +91,38 @@ fun FootprintScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "header") {
-                FootprintHeader(totalCount = uiState.totalCount)
-            }
-
-            item(key = "tabs") {
-                MiuixSegmented(
-                    options = FootprintTab.entries.toList(),
-                    selected = tab,
-                    onSelect = { tab = it },
-                    label = { it.label },
+                PageHeader(
+                    title = "足迹",
+                    subtitle = "每一次吃饭都记在这里。",
+                    trailing = if (uiState.totalCount > 0) {
+                        {
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                AnimatedCounter(
+                                    value = uiState.totalCount,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "次用餐",
+                                    modifier = Modifier.padding(bottom = 5.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
 
             when (tab) {
                 FootprintTab.TIMELINE -> timelineContent(
                     uiState = uiState,
+                    fluid = fluid,
+                    tab = tab,
+                    onTabChange = { tab = it },
                     onQueryChange = viewModel::onQueryChange,
                     onOpenRestaurant = onOpenRestaurant,
                     onPhotoClick = { entry, index ->
@@ -138,25 +156,57 @@ private enum class FootprintTab(val label: String) {
     STATS("统计"),
 }
 
-/** 时间线内容。抽成 [LazyListScope] 扩展是为了让 [FootprintScreen] 本体保持可读。 */
+/**
+ * 时间线内容。抽成 [LazyListScope] 扩展是为了让 [FootprintScreen] 本体保持可读。
+ *
+ * stickyHeader 是实验 API：标注在调用方（带 OptIn 的 FootprintScreen）还不够，
+ * 定义这个扩展函数的编译单元也要 OptIn，否则按函数分别校验会报错。
+ */
+@OptIn(ExperimentalFoundationApi::class)
 private fun LazyListScope.timelineContent(
     uiState: FootprintUiState,
+    fluid: Boolean,
+    tab: FootprintTab,
+    onTabChange: (FootprintTab) -> Unit,
     onQueryChange: (String) -> Unit,
     onOpenRestaurant: (Long) -> Unit,
     onPhotoClick: (FootprintEntry, Int) -> Unit,
 ) {
-    item(key = "search") { SearchBox(uiState.query, onQueryChange) }
+    stickyHeader(key = "timeline-toolbar") {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            MealSearchField(
+                value = uiState.query,
+                onValueChange = onQueryChange,
+                placeholder = "搜索店名、餐品或备注",
+            )
+            MiuixSegmented(
+                options = FootprintTab.entries.toList(),
+                selected = tab,
+                onSelect = onTabChange,
+                label = { it.label },
+            )
+        }
+    }
 
     when {
-        uiState.isLoading -> item(key = "loading") {
-            Box(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
-                contentAlignment = Alignment.Center,
-            ) { CircularProgressIndicator() }
-        }
+        uiState.isLoading -> item(key = "loading") { LoadingBlock(label = "正在加载足迹…") }
 
         uiState.sections.isEmpty() -> item(key = "empty") {
-            EmptyFootprint(isSearchMiss = uiState.isSearchMiss)
+            EmptyStateBlock(
+                icon = Icons.Rounded.Restaurant,
+                title = if (uiState.isSearchMiss) "没有找到相关记录" else "还没有用餐记录",
+                message = if (uiState.isSearchMiss) {
+                    "换个关键词试试，店名、餐品、备注都可以搜。"
+                } else {
+                    "吃过之后点右下角的加号，记下评价和花费。"
+                },
+            )
         }
 
         else -> uiState.sections.forEach { section ->
@@ -179,7 +229,7 @@ private fun LazyListScope.timelineContent(
                     onPhotoClick = { photoIndex -> onPhotoClick(entry, photoIndex) },
                     modifier = Modifier
                         .animateItem()
-                        .staggeredEnter(index),
+                        .staggeredEnter(index, enabled = fluid),
                 )
             }
         }
@@ -192,7 +242,13 @@ private fun LazyListScope.statsContent(
     onOpenRestaurant: (Long) -> Unit,
 ) {
     if (!uiState.hasStats) {
-        item(key = "stats-empty") { EmptyStats() }
+        item(key = "stats-empty") {
+            EmptyStateBlock(
+                icon = Icons.Rounded.Restaurant,
+                title = "还没有可统计的数据",
+                message = "记录几次用餐之后，这里会显示次数、花费与常去的店。",
+            )
+        }
         return
     }
 
@@ -484,78 +540,8 @@ private fun TopRestaurantsCard(
     }
 }
 
-@Composable
-private fun EmptyStats() {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(72.dp)
-                .clip(MaterialTheme.shapes.large)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Rounded.Restaurant,
-                contentDescription = null,
-                modifier = Modifier.size(32.dp),
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-        }
-        Spacer(Modifier.height(18.dp))
-        Text("还没有可统计的数据", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "记录几次用餐之后，这里会显示次数、花费与常去的店。",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
 /** 柱状图的最大柱高。 */
 private val MAX_BAR_HEIGHT = 72.dp
-
-/**
- * 页面头部。
- *
- * 只保留「一共吃了多少次」这一个数字，评价分布与其它聚合指标都移到「统计」分段 ——
- * 头部在两个分段下都会显示，若把统计信息放进来，切到统计页就会看到同一组数字出现两次。
- */
-@Composable
-private fun FootprintHeader(totalCount: Int) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("足迹", style = MaterialTheme.typography.headlineLarge)
-            Text(
-                "每一次吃饭都记在这里。",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (totalCount > 0) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                AnimatedCounter(
-                    value = totalCount,
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    "次用餐",
-                    modifier = Modifier.padding(bottom = 5.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
 
 /**
  * 评价分布条。
@@ -617,49 +603,6 @@ private fun VerdictLegend(label: String, count: Int, color: Color) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-}
-
-@Composable
-private fun SearchBox(query: String, onQueryChange: (String) -> Unit) {
-    TextField(
-        value = query,
-        onValueChange = onQueryChange,
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        shape = MaterialTheme.shapes.medium,
-        textStyle = MaterialTheme.typography.bodyLarge,
-        placeholder = {
-            Text(
-                "搜索店名、餐品或备注",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-            )
-        },
-        leadingIcon = {
-            Icon(
-                Icons.Rounded.Search,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
-        },
-        trailingIcon = if (query.isNotBlank()) {
-            {
-                IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Rounded.Close, contentDescription = "清除搜索内容", modifier = Modifier.size(18.dp))
-                }
-            }
-        } else {
-            null
-        },
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
-            cursorColor = MaterialTheme.colorScheme.primary,
-        ),
-    )
 }
 
 /**
@@ -753,44 +696,6 @@ private fun FootprintCard(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-    }
-}
-
-@Composable
-private fun EmptyFootprint(isSearchMiss: Boolean) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(72.dp)
-                .clip(MaterialTheme.shapes.large)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Rounded.Restaurant,
-                contentDescription = null,
-                modifier = Modifier.size(32.dp),
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-        }
-        Spacer(Modifier.height(18.dp))
-        Text(
-            text = if (isSearchMiss) "没有找到相关记录" else "还没有用餐记录",
-            style = MaterialTheme.typography.titleLarge,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = if (isSearchMiss) {
-                "换个关键词试试，店名、餐品、备注都可以搜。"
-            } else {
-                "吃过之后点右下角的加号，记下评价和花费。"
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

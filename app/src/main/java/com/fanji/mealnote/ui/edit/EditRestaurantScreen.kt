@@ -1,7 +1,6 @@
 package com.fanji.mealnote.ui.edit
 
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -20,14 +19,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Restaurant
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -46,15 +42,17 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import com.fanji.mealnote.ui.components.CameraPhotoAction
-import com.fanji.mealnote.ui.components.GalleryPhotoAction
+import com.fanji.mealnote.ui.components.FormBottomGap
+import com.fanji.mealnote.ui.components.FormErrorLine
+import com.fanji.mealnote.ui.components.LoadingBlock
+import com.fanji.mealnote.ui.components.MealPhotoSection
 import com.fanji.mealnote.ui.components.MiuixButton
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixTextField
 import com.fanji.mealnote.ui.components.MiuixTopBar
 import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.SectionHeader
-import com.fanji.mealnote.ui.components.SelectedPhoto
+import com.fanji.mealnote.ui.components.rememberGalleryPicker
 import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import java.io.File
 
@@ -122,8 +120,8 @@ fun EditRestaurantScreen(
     LaunchedEffect(restaurantId) { viewModel.setRestaurantId(restaurantId) }
     LaunchedEffect(uiState.saved) { if (uiState.saved) onSaved() }
 
-    val galleryPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let { viewModel.onPhotosPicked(listOf(it)) }
+    val galleryPicker = rememberGalleryPicker(maxItems = 1) { uris ->
+        uris.firstOrNull()?.let { viewModel.onPhotosPicked(listOf(it)) }
     }
     val cameraPicker = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         val path = pendingCameraPath
@@ -141,9 +139,7 @@ fun EditRestaurantScreen(
         MiuixTopBar(title = "编辑店铺信息", onBack = onBack)
 
         when {
-            uiState.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+            uiState.isLoading -> LoadingBlock(label = "正在加载店铺…")
 
             uiState.notFound -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
@@ -190,41 +186,22 @@ fun EditRestaurantScreen(
                     }
 
                     item {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            SectionHeader(
-                                title = "封面图",
-                                subtitle = "只保留一张；移除后不会立刻删原图，保存时才结算",
-                            )
-                            if (uiState.isImportingPhotos) {
-                                Text(
-                                    text = "正在导入图片…",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                item {
-                                    GalleryPhotoAction(onClick = {
-                                        galleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                    })
-                                }
-                                item {
-                                    CameraPhotoAction(onClick = {
-                                        val (file, uri) = viewModel.createCameraTarget()
-                                        pendingCameraPath = file.absolutePath
-                                        cameraPicker.launch(uri)
-                                    })
-                                }
-                                itemsIndexed(uiState.photoPaths, key = { _, path -> path }) { index, path ->
-                                    SelectedPhoto(
-                                        path = path,
-                                        contentDescription = "餐厅封面图片",
-                                        onRemove = { viewModel.removePhoto(index) },
-                                        onPreview = { photoViewer.open(uiState.photoPaths, index) },
-                                    )
-                                }
-                            }
-                        }
+                        MealPhotoSection(
+                            title = "封面图",
+                            subtitle = "只保留一张；移除后不会立刻删原图，保存时才结算",
+                            photoPaths = uiState.photoPaths,
+                            photoDescription = "餐厅封面图片",
+                            isImporting = uiState.isImportingPhotos,
+                            canAddPhoto = uiState.photoPaths.isEmpty(),
+                            onGallery = { galleryPicker.launch() },
+                            onCamera = {
+                                val (file, uri) = viewModel.createCameraTarget()
+                                pendingCameraPath = file.absolutePath
+                                cameraPicker.launch(uri)
+                            },
+                            onRemove = viewModel::removePhoto,
+                            onPreview = { index -> photoViewer.open(uiState.photoPaths, index) },
+                        )
                     }
 
                     // 「从用餐照片里选」：照片已经在应用里了，不该逼用户再导入一次。
@@ -236,33 +213,18 @@ fun EditRestaurantScreen(
                                     title = "或从用餐照片里选",
                                     subtitle = "用吃过的照片当封面，不用重新导入",
                                 )
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    itemsIndexed(
-                                        items = uiState.recordPhotoPaths,
-                                        key = { _, path -> path },
-                                    ) { _, path ->
-                                        CoverCandidate(
-                                            path = path,
-                                            selected = uiState.photoPaths.firstOrNull() == path,
-                                            onClick = { viewModel.useRecordPhotoAsCover(path) },
-                                        )
-                                    }
-                                }
+                                CoverCandidateRow(
+                                    candidates = uiState.recordPhotoPaths,
+                                    selected = uiState.photoPaths.firstOrNull(),
+                                    onSelect = viewModel::useRecordPhotoAsCover,
+                                )
                             }
                         }
                     }
 
-                    uiState.errorMessage?.let { message ->
-                        item {
-                            Text(
-                                text = message,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    }
+                    item { FormErrorLine(message = uiState.errorMessage) }
 
-                    item { Spacer(Modifier.height(4.dp)) }
+                    item { FormBottomGap() }
                 }
 
                 MiuixButton(
@@ -281,4 +243,34 @@ fun EditRestaurantScreen(
     }
 
     PhotoViewerHost(photoViewer)
+}
+
+/**
+ * Cover candidates in a horizontal row.
+ *
+ * Extracted from the EditRestaurantScreen body so the screen reads as
+ * sections rather than nested LazyRow builders. Selection renders with
+ * primary stroke plus check badge, never color alone.
+ */
+@Composable
+private fun CoverCandidateRow(
+    candidates: List<String>,
+    selected: String?,
+    onSelect: (String) -> Unit,
+) {
+    androidx.compose.foundation.lazy.LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items(
+            count = candidates.size,
+            key = { index -> candidates[index] },
+        ) { index ->
+            val path = candidates[index]
+            CoverCandidate(
+                path = path,
+                selected = selected == path,
+                onClick = { onSelect(path) },
+            )
+        }
+    }
 }

@@ -65,7 +65,9 @@ import coil.compose.AsyncImage
 import com.fanji.mealnote.data.local.DiningRecordWithPhotos
 import com.fanji.mealnote.data.local.RestaurantWithRecords
 import com.fanji.mealnote.ui.components.ConfirmDialog
+import com.fanji.mealnote.ui.components.EmptyStateBlock
 import com.fanji.mealnote.ui.components.GlassSurface
+import com.fanji.mealnote.ui.components.LoadingBlock
 import com.fanji.mealnote.ui.components.MessageBanner
 import com.fanji.mealnote.ui.components.MiuixButton
 import com.fanji.mealnote.ui.components.MiuixButtonStyle
@@ -79,6 +81,7 @@ import com.fanji.mealnote.ui.components.ShareCardSheet
 import com.fanji.mealnote.ui.components.StatusBadge
 import com.fanji.mealnote.ui.components.VerdictBadge
 import com.fanji.mealnote.ui.components.glassBackdropSource
+import com.fanji.mealnote.ui.components.isFluidMotion
 import com.fanji.mealnote.ui.components.rememberGlassBackdrop
 import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import com.fanji.mealnote.ui.formatMealDate
@@ -114,6 +117,7 @@ fun RestaurantDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val backdrop = rememberGlassBackdrop()
+    val fluid = isFluidMotion
     val listState = rememberLazyListState()
     val photoViewer = rememberPhotoViewerState()
     val context = LocalContext.current
@@ -156,16 +160,20 @@ fun RestaurantDetailScreen(
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         when {
-            uiState.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+            uiState.isLoading -> LoadingBlock(label = "正在加载店铺…")
 
-            detail == null -> MissingRestaurant(onBack = onBack)
+            detail == null -> EmptyStateBlock(
+                icon = Icons.Rounded.Restaurant,
+                title = "这家店已经不在了",
+                message = "它可能已经被删除，返回清单看看其它的。",
+                actionLabel = "返回清单",
+                onAction = onBack,
+            )
 
             else -> {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize().glassBackdropSource(backdrop),
+                    modifier = Modifier.fillMaxSize().glassBackdropSource(backdrop, enabled = fluid),
                     contentPadding = PaddingValues(bottom = BOTTOM_BAR_SPACE),
                 ) {
                     item(key = "hero") {
@@ -250,6 +258,7 @@ fun RestaurantDetailScreen(
                             .graphicsLayer { alpha = collapse },
                         shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp),
                         blurRadius = 26.dp,
+                        fluid = fluid,
                     ) {
                         Box(
                             modifier = Modifier
@@ -296,6 +305,7 @@ fun RestaurantDetailScreen(
                     modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
                     shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                     blurRadius = 30.dp,
+                    fluid = fluid,
                 ) {
                     Row(
                         modifier = Modifier
@@ -655,41 +665,14 @@ private fun EmptyRecords(onAddVisit: () -> Unit) {
         elevation = 2.dp,
         contentPadding = PaddingValues(24.dp),
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(60.dp)
-                    .clip(MaterialTheme.shapes.large)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Rounded.Restaurant,
-                    contentDescription = null,
-                    modifier = Modifier.size(28.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            Text("还没有用餐记录", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(5.dp))
-            Text(
-                text = "吃完之后记一笔，评价、餐品、花费和照片都能留下。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(18.dp))
-            MiuixButton(
-                label = "记录这一餐",
-                onClick = onAddVisit,
-                icon = Icons.Rounded.Add,
-                height = 48.dp,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+        EmptyStateBlock(
+            icon = Icons.Rounded.Restaurant,
+            title = "还没有用餐记录",
+            message = "吃完之后记一笔，评价、餐品、花费和照片都能留下。",
+            actionLabel = "记录这一餐",
+            onAction = onAddVisit,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
     }
 }
 
@@ -746,44 +729,5 @@ private fun RestaurantActionsMenu(onEdit: () -> Unit, onDelete: () -> Unit) {
                 },
             )
         }
-    }
-}
-
-@Composable
-private fun MissingRestaurant(onBack: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(72.dp)
-                .clip(MaterialTheme.shapes.large)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Rounded.Restaurant,
-                contentDescription = null,
-                modifier = Modifier.size(32.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Spacer(Modifier.height(18.dp))
-        Text("这家店已经不在了", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "它可能已经被删除，返回清单看看其它的。",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(20.dp))
-        MiuixButton(
-            label = "返回清单",
-            onClick = onBack,
-            height = 48.dp,
-            modifier = Modifier.width(180.dp),
-        )
     }
 }

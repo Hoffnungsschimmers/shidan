@@ -2,6 +2,88 @@
 
 本项目遵循语义化版本思路记录主要变更。
 
+## 0.4.0
+
+本版修复旧设备上的两个高频故障，并补上诊断与同步能力。无数据库 schema 变更。
+
+### 修复：编辑页打开是空白
+
+两个编辑页（编辑店铺、编辑用餐）的 `load()` 用 `savedStateHandle.contains(KEY_...)`
+判断是否为进程重建。但 `init` 里的持久化协程在构造期间就会把空表单写回 handle，
+该判断恒为 true，正常进入也走“保留用户输入”分支，店名/地址/封面永远是空白。
+改为复用构造时捕获的 `restoredFromSavedState`；`setRestaurantId/setRecordId`
+补上“重建后 id 相等但数据未加载时继续走 load”的条件。
+
+### 修复：旧机型相册导入失败
+
+此前只修了“选择器打不开就崩”（`GalleryPicker` 降级到 `GetContent`）。
+能选但导入失败的根因在解码层：`PhotoStore` 只有 Bitmap 解码一条路，
+旧机型遇到特殊编码或 ROM 解码器缺失就返回 null，前端一律“导入失败”。
+
+- 解码失败后退回原始字节直拷（上限 32MB），原图至少能存下来；
+- 直拷后校验文件头魔数，误选非图片文件时明确提示“不是有效的图片”；
+- 四个表单页的失败提示按原因区分，成败记入运行日志。
+
+### 新增：运行日志与一键导出
+
+新增 `AppLog`：内存 500 条环形缓冲 + `cacheDir/logs/` 落盘（上限 200KB 滚动）。
+只记事件与脱敏来源，不记店名、备注、花费原文与完整路径。
+设置页新增“运行日志”区，一键经系统分享导出文本（含版本与机型头）。
+
+### 新增：流畅模式
+
+设置页新增开关：关闭后玻璃退化为不透明材质（跳过离屏录制与实时模糊）、
+列表取消入场动画、页面转场只做淡入淡出。低内存设备或 Android 10 及以下
+首次安装默认关闭，手动切换后以手动为准。
+
+### 新增：WebDAV 服务器同步（最小实现）
+
+设置页新增“服务器同步”区，支持坚果云、群晖、NAS 等 WebDAV：
+
+- 上传当前数据（覆盖远端单个文件，默认 `mealnote-backup-latest.zip`）；
+- 从服务器下载并恢复（全量替换，二次确认）；
+- 只允许 `https`，局域网放行 `http` 内网段；Basic 认证，密码只存本机；
+- 下载复用 SAF 导入同一套校验（ZIP 炸弹、路径穿越、版本校验）；
+- 传输走平台 `HttpURLConnection`，零新依赖；需 `INTERNET` 权限，
+  不授权仅同步不可用，其余功能不受影响。
+
+### 其他
+
+- 备份包真正包含封面文件：此前 `restaurants.json` 写了 `cover{id}.jpg`
+  文件名但包内没有该条目，恢复时一律丢封面。本版打包封面并只对磁盘
+  真实存在的文件写名；`ZIP` 条目写入加 `try/finally closeEntry`。
+- 导入前置校验：超 512MB 或明确非 zip 扩展名的文件直接拒绝。
+- 设置页版本号改读 `BuildConfig` 与 `BackupFormat`，消除手写常量漂移。
+- 术语统一：`WANT_TO_EAT` 文案由“计划探访”改为“待探访”。
+- `Glass.kt` 的 `RenderEffect` 调用加显式版本检查，消除 Lint NewApi 误报。
+- `AddRestaurantViewModel.onPhotosPicked` 的磁盘删除移出 `update` lambda。
+- **WebDAV 重定向防线修复**：旧实现在 `openConnection` 阶段读 `Location` 头，
+  此时连接尚未建立、读到的永远是空，这道防线从未生效。改为拿到响应码后再检查，
+  PUT / GET 的错误统一走 `redirectAwareError`，重定向一律不自动跟随
+  （Basic 凭证不外送），并区分「目标不安全」与「要求跳转」两种文案。
+- `AppLog` 加固：单行截断 2000 字符、标签白名单过滤、行内换行清洗，
+  避免异常信息撑爆日志文件或污染滚动逻辑；落盘写入合并为单处实现。
+- 复制循环统一为 `read < 0` 视为结束、`read == 0` 继续，防御非标准流实现
+  把零长度返回误判为 EOF；SAF 查询改按列名解析索引，兼容返回额外列或
+  乱序列的 ROM 实现。
+- 界面组件拆分重构：从表单与列表页抽出 `CommonStates` / `FormSections` /
+  `VerdictSelector` 三个共享组件文件，净减约 700 行重复代码，页面行为不变。
+- 删除无调用者的 `trackPendingPhotos` / `releasePendingPhotos` /
+  `pendingCleanupCount` 与 `EditRestaurantUiState.status`；暂存区并发语义
+  由独立协议测试（`PendingPhotoCleanupConcurrencyTest`）继续覆盖。
+- 底部导航栏改用 `selectableGroup()` + `selectable(selected)` 配对写法，
+  屏幕阅读器可播报三个标签的选中态（与分段控件同一约定）。
+
+### 验证
+
+```
+单元测试 ：98 个用例全部通过
+Lint     ：0 错误
+构建     ：assembleDebug / assembleRelease 全部 SUCCESS
+签名     ：apksigner verify 通过（v2 方案）
+数据库   ：version 3（本版未改动 schema）
+```
+
 ## 0.3.9
 
 ### 新增：「照上次再来一份」

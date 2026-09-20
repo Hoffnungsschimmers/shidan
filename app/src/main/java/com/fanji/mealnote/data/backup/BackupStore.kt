@@ -1,7 +1,9 @@
 package com.fanji.mealnote.data.backup
 
+import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
@@ -12,6 +14,7 @@ import com.fanji.mealnote.data.local.RestaurantEntity
 import com.fanji.mealnote.data.local.RestaurantStatus
 import com.fanji.mealnote.data.local.Verdict
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -97,6 +100,8 @@ class BackupStore @Inject constructor(
                     fileName = fileName,
                 )
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: IOException) {
             MealResult.Failure(MealError.PhotoIoFailure)
         } catch (error: Exception) {
@@ -108,8 +113,26 @@ class BackupStore @Inject constructor(
      * 从 [source] 恢复数据，**全量替换**当前内容。
      *
      * 调用方必须在此之前获得用户明确同意（界面需提示“现有数据将被覆盖”）。
+     *
+     * 安全前提：从 SAF 拿到的 URI 指向用户选择的任意文件。解析 ZIP 之前先校验
+     * 其声明的长度与扩展名，体积过大或扩展名明显不是备份包时直接拒绝，
+     * 避免把超大文件读入解压流程。
      */
     suspend fun restore(source: Uri): MealResult<RestoreSummary> = withContext(Dispatchers.IO) {
+        // 先做轻量校验：超大文件或扩展名明显不符时直接拒绝，不进入解压流程。
+        // 文件长度走 ContentResolver 查询而非直接 open，避免对超大输入做无谓 IO。
+        val declaredSize = context.contentResolver.queryDisplaySize(source)
+        if (declaredSize != null && declaredSize > MAX_PICKED_FILE_BYTES) {
+            return@withContext MealResult.Failure(MealError.InvalidInput(FILE_TOO_LARGE))
+        }
+        val displayName = context.contentResolver.queryDisplayName(source).orEmpty()
+        // 只有“明确带有非 zip 扩展名”时才拒绝：无扩展名的文件放行到后续的内容校验，
+        // 避免因文件管理器未返回扩展名而误杀合法备份。
+        val extension = displayName.substringAfterLast('.', "")
+        if (extension.isNotEmpty() && !extension.equals("zip", ignoreCase = true)) {
+            return@withContext MealResult.Failure(MealError.InvalidInput(INVALID_ARCHIVE))
+        }
+
         val stagingDir = File(context.cacheDir, STAGING_DIR_NAME)
         try {
             stagingDir.deleteRecursively()
@@ -153,10 +176,13 @@ class BackupStore @Inject constructor(
             MealResult.Failure(MealError.PhotoIoFailure)
         } catch (_: org.json.JSONException) {
             MealResult.Failure(MealError.InvalidInput(INVALID_ARCHIVE))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Exception) {
             MealResult.Failure(MealError.DatabaseFailure(error))
         } finally {
             // 无论成功失败都清理暂存目录，避免占用缓存空间。
+            // 协程取消同样会经过这里，暂存清理不受影响。
             stagingDir.deleteRecursively()
         }
     }
@@ -183,6 +209,7 @@ class BackupStore @Inject constructor(
             val fileNames = photos.associate { photo ->
                 photo.id to stablePhotoName(photo)
             }
+            val writtenPhotoNames = fileNames.values.toMutableSet()
 
             writeEntry(zip, MANIFEST_ENTRY, manifestJson(restaurants, records, photos, fileName))
             writeEntry(zip, RESTAURANTS_ENTRY, restaurantsJson(restaurants))
@@ -196,8 +223,33 @@ class BackupStore @Inject constructor(
                 val file = File(photo.filePath)
                 if (!file.isFile) return@forEach
                 zip.putNextEntry(ZipEntry("$PHOTO_DIR/$name"))
-                file.inputStream().use { it.copyTo(zip) }
-                zip.closeEntry()
+                try {
+                    file.inputStream().use { it.copyTo(zip) }
+                } finally {
+                    zip.closeEntry()
+                }
+            }
+
+            // 封面文件单独打包：命名与 restaurants.json 中的 recommendationPhotoName 一致。
+            restaurants.forEach { restaurant ->
+                val coverName = if (restaurant.recommendationPhotoPath.isBlank()) {
+                    ""
+                } else {
+                    coverFileName(restaurant)
+                }
+                if (coverName.isEmpty()) return@forEach
+                val file = File(restaurant.recommendationPhotoPath)
+                if (!file.isFile) return@forEach
+                // 封面与用餐照片命名空间隔离（cover{id}.jpg vs record{id}_{sort}.jpg），
+                // 即使封面复用了某张用餐照片的文件字节，这里仍需以封面名另存一份，
+                // 否则导入侧按封面名找不到文件而退化为无封面。
+                if (!writtenPhotoNames.add(coverName)) return@forEach
+                zip.putNextEntry(ZipEntry("$PHOTO_DIR/$coverName"))
+                try {
+                    file.inputStream().use { it.copyTo(zip) }
+                } finally {
+                    zip.closeEntry()
+                }
             }
         }
     }
@@ -225,9 +277,26 @@ class BackupStore @Inject constructor(
 
     private fun restaurantsJson(restaurants: List<RestaurantEntity>): String {
         val array = JSONArray()
+        // 封面文件名必须与实际写入 ZIP 的照片条目一一对应：导出时只打包
+        // 确实存在于磁盘的封面文件，缺失的不再写入文件名，避免导入侧
+        // 期待一个包内根本不存在的文件。
+        val existingCovers = restaurants
+            .mapNotNull { restaurant ->
+                restaurant.recommendationPhotoPath
+                    .takeIf(String::isNotBlank)
+                    ?.let { File(it) }
+                    ?.takeIf { it.isFile }
+                    ?.absolutePath
+            }
+            .toSet()
         restaurants.forEach { restaurant ->
             // 历史遗留字段（city / cuisine / tags / priceHint / sourceUrl / sourceNote）
             // 明确不导出：它们已从产品交互中移除，导出只会让备份文件携带无意义数据。
+            val coverName = if (restaurant.recommendationPhotoPath in existingCovers) {
+                coverFileName(restaurant)
+            } else {
+                ""
+            }
             array.put(
                 JSONObject().apply {
                     put("id", restaurant.id)
@@ -236,7 +305,7 @@ class BackupStore @Inject constructor(
                     put("status", restaurant.status.name)
                     put("createdAt", restaurant.createdAt)
                     put("updatedAt", restaurant.updatedAt)
-                    put("recommendationPhotoName", coverFileName(restaurant))
+                    put("recommendationPhotoName", coverName)
                 }
             )
         }
@@ -433,7 +502,8 @@ class BackupStore @Inject constructor(
         var written = 0L
         while (true) {
             val read = read(buffer)
-            if (read <= 0) break
+            if (read < 0) break
+            if (read == 0) continue
             written += read
             if (written > limit) throw IOException("Entry exceeds size limit")
             output.write(buffer, 0, read)
@@ -461,6 +531,42 @@ class BackupStore @Inject constructor(
         const val MAX_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
         const val MAX_NAME_LENGTH = 128
 
+        /**
+         * 用户可选择的备份文件上限。
+         *
+         * ZIP 本身有压缩，磁盘上的包通常远小于解压后的总量；
+         * 该上限只拦截“明显不可能是备份包”的超大文件，正常备份不会触及。
+         */
+        const val MAX_PICKED_FILE_BYTES = 512L * 1024 * 1024
+
         const val INVALID_ARCHIVE = "备份文件格式不正确或已损坏"
+        const val FILE_TOO_LARGE = "备份文件过大，无法导入"
     }
+
+    /**
+     * 查询 SAF 文档的显示文件名。
+     *
+     * 不同 ROM 的列实现有差异，任何异常都视为“查不到”而非失败：
+     * 查不到只意味着跳过扩展名校验，不影响后续的内容校验。
+     * 列索引按列名解析而非硬编码 0：部分实现可能返回额外列或打乱顺序。
+     */
+    private fun ContentResolver.queryDisplayName(uri: Uri): String? = runCatching {
+        query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index < 0 || cursor.isNull(index)) null else cursor.getString(index)
+        }
+    }.getOrNull()
+
+    /** 查询 SAF 文档的声明长度；查不到时返回 null，由后续的解压上限继续兜底。 */
+    private fun ContentResolver.queryDisplaySize(uri: Uri): Long? = runCatching {
+        query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (index < 0 || cursor.isNull(index)) {
+                return@use null
+            }
+            cursor.getLong(index).takeIf { it >= 0 }
+        }
+    }.getOrNull()
 }

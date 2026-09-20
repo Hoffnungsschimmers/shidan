@@ -1,22 +1,17 @@
 package com.fanji.mealnote.ui.add
 
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.LocationOn
@@ -33,15 +28,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.fanji.mealnote.ui.components.CameraPhotoAction
-import com.fanji.mealnote.ui.components.GalleryPhotoAction
+import com.fanji.mealnote.ui.components.FormBottomGap
+import com.fanji.mealnote.ui.components.FormErrorLine
+import com.fanji.mealnote.ui.components.MealPhotoSection
 import com.fanji.mealnote.ui.components.MiuixButton
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixTextField
 import com.fanji.mealnote.ui.components.MiuixTopBar
 import com.fanji.mealnote.ui.components.PhotoViewerHost
-import com.fanji.mealnote.ui.components.SelectedPhoto
-import com.fanji.mealnote.ui.components.SectionHeader
+import com.fanji.mealnote.ui.components.rememberGalleryPicker
 import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import java.io.File
 
@@ -71,8 +66,8 @@ fun AddRestaurantScreen(
         uiState.savedId?.let(onSaved)
     }
 
-    val galleryPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let { viewModel.onPhotosPicked(listOf(it)) }
+    val galleryPicker = rememberGalleryPicker(maxItems = 1) { uris ->
+        uris.firstOrNull()?.let { viewModel.onPhotosPicked(listOf(it)) }
     }
     val cameraPicker = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         val path = pendingCameraPath
@@ -146,54 +141,27 @@ fun AddRestaurantScreen(
             }
 
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SectionHeader(
-                        title = "封面图",
-                        subtitle = "选填，只保留一张，用来在列表里一眼认出它",
-                    )
-                    if (uiState.isImportingPhotos) {
-                        Text(
-                            text = "正在导入图片…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        item {
-                            GalleryPhotoAction(onClick = {
-                                galleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                            })
-                        }
-                        item {
-                            CameraPhotoAction(onClick = {
-                                val (file, uri) = viewModel.createCameraTarget()
-                                pendingCameraPath = file.absolutePath
-                                cameraPicker.launch(uri)
-                            })
-                        }
-                        itemsIndexed(uiState.photoPaths, key = { _, path -> path }) { index, path ->
-                            SelectedPhoto(
-                                path = path,
-                                contentDescription = "餐厅封面图片",
-                                onRemove = { viewModel.removePhoto(index) },
-                                onPreview = { photoViewer.open(uiState.photoPaths, index) },
-                            )
-                        }
-                    }
-                }
+                MealPhotoSection(
+                    title = "封面图",
+                    subtitle = "选填，只保留一张，用来在列表里一眼认出它",
+                    photoPaths = uiState.photoPaths,
+                    photoDescription = "餐厅封面图片",
+                    isImporting = uiState.isImportingPhotos,
+                    canAddPhoto = uiState.photoPaths.isEmpty(),
+                    onGallery = { galleryPicker.launch() },
+                    onCamera = {
+                        val (file, uri) = viewModel.createCameraTarget()
+                        pendingCameraPath = file.absolutePath
+                        cameraPicker.launch(uri)
+                    },
+                    onRemove = viewModel::removePhoto,
+                    onPreview = { index -> photoViewer.open(uiState.photoPaths, index) },
+                )
             }
 
-            uiState.errorMessage?.let { message ->
-                item {
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
+            item { FormErrorLine(message = uiState.errorMessage) }
 
-            item { Spacer(Modifier.height(4.dp)) }
+            item { FormBottomGap() }
         }
 
         MiuixButton(

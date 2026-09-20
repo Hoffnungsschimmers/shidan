@@ -15,6 +15,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.fanji.mealnote.ui.add.AddRestaurantScreen
+import com.fanji.mealnote.ui.components.LocalFluidMotion
 import com.fanji.mealnote.ui.detail.RestaurantDetailScreen
 import com.fanji.mealnote.ui.edit.EditRestaurantScreen
 import com.fanji.mealnote.ui.edit.EditVisitScreen
@@ -74,39 +75,58 @@ object Routes {
 @Composable
 fun MealNoteApp() {
     val navController = rememberNavController()
+    // 流畅偏好由 MainActivity 经 CompositionLocal 提供（见 FluidMotion.kt）。
+    // 导航转场动画据此切换：关闭时只做淡入淡出，低端机不再承担位移动画。
+    val fluid = LocalFluidMotion.current
 
     NavHost(
         navController = navController,
         startDestination = Routes.MAIN,
-        enterTransition = {
-            slideInHorizontally(
-                initialOffsetX = { width -> width / 6 },
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-            ) + fadeIn(animationSpec = tween(200))
+        enterTransition = if (fluid) {
+            {
+                slideInHorizontally(
+                    initialOffsetX = { width -> width / 6 },
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                ) + fadeIn(animationSpec = tween(200))
+            }
+        } else {
+            { fadeIn(animationSpec = tween(120)) }
         },
-        exitTransition = {
-            slideOutHorizontally(
-                targetOffsetX = { width -> -width / 12 },
-                animationSpec = tween(220),
-            ) + fadeOut(animationSpec = tween(160))
+        exitTransition = if (fluid) {
+            {
+                slideOutHorizontally(
+                    targetOffsetX = { width -> -width / 12 },
+                    animationSpec = tween(220),
+                ) + fadeOut(animationSpec = tween(160))
+            }
+        } else {
+            { fadeOut(animationSpec = tween(120)) }
         },
-        popEnterTransition = {
-            slideInHorizontally(
-                initialOffsetX = { width -> -width / 12 },
-                animationSpec = tween(220),
-            ) + fadeIn(animationSpec = tween(200))
+        popEnterTransition = if (fluid) {
+            {
+                slideInHorizontally(
+                    initialOffsetX = { width -> -width / 12 },
+                    animationSpec = tween(220),
+                ) + fadeIn(animationSpec = tween(200))
+            }
+        } else {
+            { fadeIn(animationSpec = tween(120)) }
         },
-        popExitTransition = {
-            slideOutHorizontally(
-                targetOffsetX = { width -> width / 6 },
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-            ) + fadeOut(animationSpec = tween(160))
+        popExitTransition = if (fluid) {
+            {
+                slideOutHorizontally(
+                    targetOffsetX = { width -> width / 6 },
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                ) + fadeOut(animationSpec = tween(160))
+            }
+        } else {
+            { fadeOut(animationSpec = tween(120)) }
         },
     ) {
         composable(Routes.MAIN) {

@@ -4,7 +4,9 @@
 
 ## 当前状态
 
-项目处于 V0.3 阶段。核心记录流程、管理能力、备份恢复与界面重做均已完成。
+项目处于 V0.4 阶段。在 V0.3（核心记录流程、管理能力、备份恢复、界面重做）
+之上，本版修复旧设备上的编辑空白与相册导入失败，并新增运行日志、
+流畅模式与 WebDAV 服务器同步。详见 [CHANGELOG.md](CHANGELOG.md) 的 0.4.0 节。
 
 **信息架构**（底部三栏）
 
@@ -38,7 +40,9 @@
 
 - 导出全部数据为版本化 ZIP 备份包，可从备份文件完整恢复；
 - 设置页提供照片存储用量统计、无用文件清理与清空数据；
-- 所有数据仅保存在本机，不需要任何存储权限。
+- 所有数据默认只保存在本机，不需要任何存储权限；
+- 可选的 WebDAV 服务器同步需 `INTERNET` 权限：仅在用户主动配置并点击上传/下载时
+  与用户自己的服务器通信，其余功能不受影响。
 
 **界面**
 
@@ -49,7 +53,7 @@
 - 分享卡片：把一次用餐渲染成竖版图片交给系统分享面板（先预览再分享）；
 - 深色模式可选「跟随系统 / 浅色 / 深色」。
 
-完整设计规范见 [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md)，路线图见 [PROJECT_PLAN.md](PROJECT_PLAN.md)，版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+完整设计规范见 [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md)，**下一步规划见 [ROADMAP.md](ROADMAP.md)**（历史项目书见 [PROJECT_PLAN.md](PROJECT_PLAN.md)），版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 技术栈
 
@@ -141,10 +145,10 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 
 | 检查项 | 状态 |
 |---|---|
-| `testDebugUnitTest` | 98 个用例全部通过（经 JDK 直接运行验证，见上方环境问题说明） |
+| `testDebugUnitTest` | 98 个用例全部通过，0 失败 0 错误 |
 | `lintDebug` | 通过（0 错误） |
-| `assembleDebug` | 通过 |
-| `assembleRelease` | 通过（R8 混淆 + 资源裁剪，已签名） |
+| `assembleDebug` | 通过（versionCode 13，versionName 0.4.0） |
+| `assembleRelease` | 通过（R8 混淆 + 资源裁剪，v2 签名已验证） |
 
 数据库版本 3，`identityHash` = `9a477c043b56c97eb725b6ad2011a9ed`。
 
@@ -200,7 +204,8 @@ ui/components/  Miuix.kt（通用组件）、Motion.kt（动效）、Glass.kt（
 
 ## 数据与隐私
 
-餐厅、用餐记录和照片默认只保存在应用本地目录，**不会上传到任何服务器**。
+餐厅、用餐记录和照片默认只保存在应用本地目录。未配置同步时**不会连接任何服务器**；
+配置 WebDAV 并主动触发上传/下载后，仅与用户填写的服务器地址通信。
 
 - **备份与恢复**：设置页可将全部数据导出为 ZIP 备份包（含照片），并在换机或重装后完整恢复。
   导入采用全量替换，执行前会二次确认。
@@ -238,5 +243,3 @@ Release 包使用项目根目录的 `mealnote-release.jks` 自签名，凭据写
 - 数据模型变更必须执行升级测试；
 - 图片删除、取消和保存失败流程必须验证文件清理；
 - 提交前至少运行单元测试、Lint 和 Debug 构建。
-
-

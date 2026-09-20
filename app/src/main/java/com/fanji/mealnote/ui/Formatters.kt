@@ -33,7 +33,7 @@ private val dayFormatter = DateTimeFormatter.ofPattern("d日 EEEE", Locale.CHINA
 
 /** 餐厅状态的中文文案。 */
 fun RestaurantStatus.displayName(): String = when (this) {
-    RestaurantStatus.WANT_TO_EAT -> "计划探访"
+    RestaurantStatus.WANT_TO_EAT -> "待探访"
     RestaurantStatus.EATEN -> "已用餐"
 }
 

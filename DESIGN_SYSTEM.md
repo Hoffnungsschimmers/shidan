@@ -303,5 +303,7 @@ val segmentHeight = maxOf(SEGMENT_HEIGHT, textHeight + SEGMENT_INSET * 2 + 10.dp
 
 ## 十一、数据与隐私
 
-所有数据保存在应用私有目录，**不联网、不上传**。备份导出走系统文件选择器（SAF），
+餐厅、用餐记录和照片默认只保存在应用私有目录。未配置同步时**不会连接任何服务器**；
+配置 WebDAV 并主动触发上传/下载后，仅与用户填写的服务器地址通信（需 `INTERNET` 权限，
+不授权仅同步不可用，其余功能不受影响）。备份导出与导入走系统文件选择器（SAF），
 因此应用不申请任何存储权限。备份包为 ZIP：`manifest.json` + 三张表的 JSON + `photos/`。

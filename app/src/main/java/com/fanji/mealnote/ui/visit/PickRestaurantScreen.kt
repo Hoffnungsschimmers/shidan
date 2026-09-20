@@ -18,30 +18,27 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Storefront
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fanji.mealnote.data.local.RestaurantEntity
+import com.fanji.mealnote.ui.components.EmptyStateBlock
+import com.fanji.mealnote.ui.components.LoadingBlock
+import com.fanji.mealnote.ui.components.MealSearchField
+import androidx.compose.material3.Icon
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixTopBar
 import com.fanji.mealnote.ui.components.RestaurantRow
+import com.fanji.mealnote.ui.components.isFluidMotion
 import com.fanji.mealnote.ui.components.staggeredEnter
 
 /**
@@ -58,6 +55,7 @@ fun PickRestaurantScreen(
     viewModel: PickRestaurantViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val fluid = isFluidMotion
 
     Column(
         modifier = Modifier
@@ -117,40 +115,22 @@ fun PickRestaurantScreen(
             }
 
             item(key = "search") {
-                SearchBox(uiState.query, viewModel::onQueryChange)
+                MealSearchField(
+                    value = uiState.query,
+                    onValueChange = viewModel::onQueryChange,
+                    placeholder = "搜索店名或地址",
+                )
             }
 
             when {
-                uiState.isLoading -> item(key = "loading") {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
-                        contentAlignment = Alignment.Center,
-                    ) { CircularProgressIndicator() }
-                }
+                uiState.isLoading -> item(key = "loading") { LoadingBlock(label = "正在加载店铺…") }
 
                 uiState.restaurants.isEmpty() -> item(key = "empty") {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 44.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Icon(
-                            Icons.Rounded.Storefront,
-                            contentDescription = null,
-                            modifier = Modifier.size(30.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        Text(
-                            text = if (uiState.isSearchMiss) "没有找到这家店" else "清单里还没有店",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Spacer(Modifier.height(5.dp))
-                        Text(
-                            text = "用上面的「新建一家」直接添加。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    EmptyStateBlock(
+                        icon = Icons.Rounded.Storefront,
+                        title = if (uiState.isSearchMiss) "没有找到这家店" else "清单里还没有店",
+                        message = "用上面的「新建一家」直接添加。",
+                    )
                 }
 
                 else -> {
@@ -167,7 +147,7 @@ fun PickRestaurantScreen(
                         PickableRestaurantCard(
                             restaurant = restaurant,
                             onClick = { onPick(restaurant.id) },
-                            modifier = Modifier.staggeredEnter(0),
+                            modifier = Modifier.staggeredEnter(0, enabled = fluid),
                         )
                     }
                 }
@@ -190,47 +170,4 @@ private fun PickableRestaurantCard(
     ) {
         RestaurantRow(restaurant = restaurant)
     }
-}
-
-@Composable
-private fun SearchBox(query: String, onQueryChange: (String) -> Unit) {
-    TextField(
-        value = query,
-        onValueChange = onQueryChange,
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        shape = MaterialTheme.shapes.medium,
-        textStyle = MaterialTheme.typography.bodyLarge,
-        placeholder = {
-            Text(
-                "搜索店名或地址",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-            )
-        },
-        leadingIcon = {
-            Icon(
-                Icons.Rounded.Search,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
-        },
-        trailingIcon = if (query.isNotBlank()) {
-            {
-                IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Rounded.Close, contentDescription = "清除搜索内容", modifier = Modifier.size(18.dp))
-                }
-            }
-        } else {
-            null
-        },
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
-            cursorColor = MaterialTheme.colorScheme.primary,
-        ),
-    )
 }

@@ -55,6 +55,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -62,6 +64,7 @@ import com.fanji.mealnote.ui.components.GlassBackdrop
 import com.fanji.mealnote.ui.components.GlassSurface
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.glassBackdropSource
+import com.fanji.mealnote.ui.components.isFluidMotion
 import com.fanji.mealnote.ui.components.pressScale
 import com.fanji.mealnote.ui.components.rememberGlassBackdrop
 import com.fanji.mealnote.ui.settings.SettingsScreen
@@ -108,6 +111,7 @@ fun MainScaffold(
     onStartVisit: () -> Unit,
 ) {
     val backdrop = rememberGlassBackdrop()
+    val fluid = isFluidMotion
     var tab by rememberSaveable { mutableStateOf(MainTab.WANT) }
     var showEntrySheet by remember { mutableStateOf(false) }
 
@@ -116,19 +120,25 @@ fun MainScaffold(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .glassBackdropSource(backdrop)
+                .glassBackdropSource(backdrop, enabled = fluid)
                 .statusBarsPadding(),
         ) {
             AnimatedContent(
                 targetState = tab,
                 transitionSpec = {
-                    (
-                        fadeIn(animationSpec = tween(180)) +
-                            scaleIn(
-                                initialScale = 0.985f,
-                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                            )
-                        ).togetherWith(fadeOut(animationSpec = tween(120)))
+                    if (!fluid) {
+                        fadeIn(animationSpec = tween(120)) togetherWith fadeOut(
+                            animationSpec = tween(120),
+                        )
+                    } else {
+                        (
+                            fadeIn(animationSpec = tween(180)) +
+                                scaleIn(
+                                    initialScale = 0.985f,
+                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                )
+                            ).togetherWith(fadeOut(animationSpec = tween(120)))
+                    }
                 },
                 label = "mainTab",
             ) { target ->
@@ -193,13 +203,17 @@ private fun GlassNavBar(
         modifier = modifier.fillMaxWidth(),
         shape = shape,
         blurRadius = 32.dp,
+        fluid = isFluidMotion,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .height(NAV_BAR_HEIGHT)
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = 10.dp)
+                // 底部导航是 Tab 语义：容器声明 selectableGroup 后，
+                // 屏幕阅读器会把三个选项读成一组并播报选中态。
+                .selectableGroup(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             MainTab.entries.forEach { entry ->
@@ -241,7 +255,8 @@ private fun RowScope.NavItem(tab: MainTab, selected: Boolean, onClick: () -> Uni
             .padding(vertical = 8.dp, horizontal = 4.dp)
             .clip(MaterialTheme.shapes.small)
             .background(pillColor)
-            .clickable(
+            .selectable(
+                selected = selected,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = LocalIndication.current,
                 role = Role.Tab,

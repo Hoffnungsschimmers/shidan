@@ -12,9 +12,9 @@ import com.fanji.mealnote.data.local.RestaurantWithRecords
 import com.fanji.mealnote.data.local.Verdict
 import kotlinx.coroutines.flow.Flow
 import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.cancellation.CancellationException
 
 /** 单次用餐记录允许的照片上限，与表单中的 9 张限制保持一致。 */
 internal const val MAX_PHOTOS_PER_RECORD = 9
@@ -43,10 +43,6 @@ internal const val MAX_NOTE_LENGTH = 2_000
  * 关键约定 —— **先提交事务，再删除文件**：
  * 若顺序颠倒，事务回滚后数据库仍引用着已被删除的文件，会形成不可修复的坏记录；
  * 反之最坏结果是留下一个孤儿文件，可由 [cleanupOrphanPhotos] 安全回收。
- *
- * 并发约定：本类是 `@Singleton`，会被多个 ViewModel 的协程同时调用，因此
- * - 所有共享可变状态必须线程安全（见 [_pendingPhotoCleanup]）；
- * - 文件系统与数据库操作不使用 `synchronized`，避免持锁做 IO 导致主线程阻塞。
  */
 @Singleton
 class MealRepository @Inject constructor(
@@ -196,16 +192,13 @@ class MealRepository @Inject constructor(
                 mealDao.updateRestaurant(
                     restaurant.copy(status = RestaurantStatus.EATEN, updatedAt = now)
                 )
-                recordId to takePendingPhotos(restaurantId)
+                recordId
             }
         }
         return when (outcome) {
             is MealResult.Failure -> outcome
             is MealResult.Success -> {
-                val (recordId, stalePhotos) = outcome.value
-                // 事务已提交：此时回收用户在表单中替换掉的图片不会破坏一致性。
-                deleteUnreferencedFiles(stalePhotos.filterNot(acceptedPhotos::contains))
-                MealResult.Success(recordId)
+                MealResult.Success(outcome.value)
             }
         }
     }
@@ -265,15 +258,15 @@ class MealRepository @Inject constructor(
                     restaurant.copy(status = RestaurantStatus.EATEN, updatedAt = now)
                 )
                 // 返回值 = 旧路径中不再被本记录引用的部分。
-                previousPaths.filterNot(acceptedPhotos::contains) to takePendingPhotos(record.restaurantId)
+                previousPaths.filterNot(acceptedPhotos::contains)
             }
         }
         return when (outcome) {
             is MealResult.Failure -> outcome
             is MealResult.Success -> {
-                val (stalePhotos, pendingPhotos) = outcome.value
+                val stalePhotos = outcome.value
                 // 事务已提交：此时回收用户替换掉的图片不会破坏一致性。
-                deleteUnreferencedFiles(stalePhotos + pendingPhotos.filterNot(acceptedPhotos::contains))
+                deleteUnreferencedFiles(stalePhotos)
                 MealResult.Success(Unit)
             }
         }
@@ -330,11 +323,12 @@ class MealRepository @Inject constructor(
      * @return 本次清理的文件数量。
      */
     suspend fun cleanupOrphanPhotos(): Int {
-        // 排除集合必须同时包含：用餐照片 + 餐厅封面 + 各表单尚未提交的图片。
+        // 排除集合 = 数据库引用的全部文件：用餐照片 + 餐厅封面。
+        // 注意调用仍要求「没有正在编辑的表单」：未提交的图片不在数据库内，
+        // 若此时清理会误删用户正在编辑的照片（调用方需确认，通常由设置页单独入口触发）。
         val referenced = buildSet {
             addAll(mealDao.getAllPhotoPaths())
             addAll(mealDao.getRestaurantCoverPaths())
-            addAll(pendingPhotoSnapshot())
         }
         return photoStore.deleteOrphanPhotos(referenced)
     }
@@ -409,28 +403,6 @@ class MealRepository @Inject constructor(
     }
 
     /**
-     * 登记表单中“已被替换、等待回收”的图片。
-     *
-     * 之所以不立即删除：用户可能反复替换后仍想保留最早那张，过早删除会让预览失效。
-     * 回收时机由调用方决定 —— 保存成功时由 [addDiningRecord] 消费，
-     * 放弃表单时由 [releasePendingPhotos] 消费。
-     */
-    fun trackPendingPhotos(formKey: Long, paths: List<String>) {
-        if (paths.isEmpty()) return
-        // 采用替换语义：同一表单重复登记时以最新一次为准，避免列表无限增长。
-        _pendingPhotoCleanup[formKey] = paths
-    }
-
-    /**
-     * 取出并清空指定表单的待回收图片。
-     *
-     * 使用 [ConcurrentHashMap.remove] 保证“取出即清空”的原子性：两个协程同时调用时，
-     * 只有一个能拿到列表，另一个得到空列表，从而避免同一批文件被删除两次。
-     */
-    fun releasePendingPhotos(formKey: Long): List<String> =
-        _pendingPhotoCleanup.remove(formKey).orEmpty()
-
-    /**
      * 把餐厅状态同步为“已用餐 / 待探访”。
      *
      * 必须在事务内调用：与删除操作同属一次原子提交。
@@ -449,8 +421,13 @@ class MealRepository @Inject constructor(
         }
     }
 
-    /** 原子地取出指定表单的待回收图片；供事务提交后清理使用。 */
-    private fun takePendingPhotos(formKey: Long): List<String> = releasePendingPhotos(formKey)
+    // ---------------------------------------------------------------- 待回收图片
+    //
+    // 历史上这里曾有一套「表单登记待回收图片」的暂存区（track/releasePendingPhotos）：
+    // 但全仓搜索确认没有任何调用方登记过，四个表单的图片都由各自 ViewModel 的
+    // onCleared / removePhoto 即时回收。此后 add/update 在事务内消费它也只会拿到空列表，
+    // 却让读者误以为“保存成功会顺带回收某批文件”。与其留着制造错误的安全感，
+    // 不如删掉，回收逻辑只看事务内收集到的真实路径。
 
     /**
      * 回收磁盘文件，**跳过仍被任何数据库行引用的路径**。
@@ -485,26 +462,18 @@ class MealRepository @Inject constructor(
     }
 
     /**
-     * 自由文本字段的入库规范化：去首尾空白 + 截断到 [limit]。
-     *
-     * 截断而非报错：超长输入通常来自粘贴，静默丢弃尾部比弹出错误更符合预期，
-     * 也不会让用户已经填好的其它字段白填。长度上限由各字段常量约束。
-     */
-    /** 当前所有表单未提交图片的快照，用于 [cleanupOrphanPhotos] 构建排除集合。 */
-    private fun pendingPhotoSnapshot(): List<String> =
-        _pendingPhotoCleanup.values.flatten()
-
-    /** 当前挂起的待清理表单数量，供测试与诊断使用。 */
-    internal fun pendingCleanupCount(): Int = _pendingPhotoCleanup.size
-
-    /**
      * 把底层异常翻译为领域错误。
      *
      * 只捕获可预期的业务异常与 [IOException]；其他异常（如空指针、SQL 约束错误）继续向上
      * 抛出，以便在开发与灰度阶段暴露真实缺陷，而不是被统一伪装成“保存失败”。
+     *
+     * 协程取消是控制流而非失败：`block` 内若因页面退出被取消，必须原样抛出，
+     * 否则调用方的 `viewModelScope` 收不到取消信号，下一个挂起点还会继续执行。
      */
     private inline fun <T> runCatchingDb(block: () -> T): MealResult<T> = try {
         MealResult.Success(block())
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (error: RestaurantMissingException) {
         MealResult.Failure(MealError.RestaurantNotFound)
     } catch (error: RecordMissingException) {
@@ -514,15 +483,6 @@ class MealRepository @Inject constructor(
     } catch (error: Exception) {
         MealResult.Failure(MealError.DatabaseFailure(error))
     }
-
-    /**
-     * 表单 key -> 已被替换但尚未回收的图片路径。
-     *
-     * 必须使用线程安全实现：本类是单例，多个 ViewModel 的协程可能并发读写。
-     * 早期版本使用普通 `mutableMapOf`，并发 `put/remove` 可能导致 `ConcurrentModificationException`
-     * 或丢失条目（进而留下孤儿文件、或误删正在使用的图片）。
-     */
-    private val _pendingPhotoCleanup = ConcurrentHashMap<Long, List<String>>()
 }
 
 /** 目标餐厅不存在，用于区分“记录已被删除”这一业务分支与真正的程序错误。 */

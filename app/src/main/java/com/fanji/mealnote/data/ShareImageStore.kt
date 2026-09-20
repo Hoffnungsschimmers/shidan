@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -64,11 +65,18 @@ class ShareImageStore @Inject constructor(
         removeExpired(directory)
 
         val target = File(directory, fileName)
-        val written = runCatching {
+        // 协程取消必须向上传递：若把它吞成“写入失败”，取消分享的手势会被当成普通失败，
+        // 调用方还会照常弹失败提示。
+        val written = try {
             target.outputStream().use { output ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, PNG_QUALITY, output)
             }
-        }.getOrDefault(false)
+        } catch (cancelled: CancellationException) {
+            target.delete()
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
 
         if (!written) {
             // 写入失败会留下半成品文件，必须清掉，否则下次分享会读到一张损坏的图。

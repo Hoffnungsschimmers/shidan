@@ -16,7 +16,7 @@ class FormattersTest {
 
     @Test
     fun `餐厅状态映射为约定术语`() {
-        assertEquals("计划探访", RestaurantStatus.WANT_TO_EAT.displayName())
+        assertEquals("待探访", RestaurantStatus.WANT_TO_EAT.displayName())
         assertEquals("已用餐", RestaurantStatus.EATEN.displayName())
     }
 

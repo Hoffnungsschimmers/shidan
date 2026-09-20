@@ -3,6 +3,7 @@ package com.fanji.mealnote.ui.components
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -84,21 +85,27 @@ fun rememberGlassBackdrop(): GlassBackdrop {
  *
  * 只应加在**铺满屏幕、且会被玻璃面板覆盖**的那个容器上（通常是页面的 LazyColumn）。
  * 每帧都会多一次离屏录制，因此不要加在多个嵌套层级上。
+ *
+ * @param enabled 流畅模式关闭时传 false：跳过离屏录制，只做位置追踪。
+ *   录制本身是每帧成本，关闭后内容照常绘制，只是玻璃面板无模糊可用。
  */
-fun Modifier.glassBackdropSource(backdrop: GlassBackdrop): Modifier = this
-    .onGloballyPositioned { backdrop.contentOrigin = it.positionInWindow() }
-    .drawWithContent {
-        backdrop.layer.record(
-            density = this,
-            layoutDirection = layoutDirection,
-            size = IntSize(size.width.toInt(), size.height.toInt()),
-        ) {
-            // 录制发生在 drawWithContent 的接收者上，必须显式指向外层的 ContentDrawScope。
-            this@drawWithContent.drawContent()
+fun Modifier.glassBackdropSource(backdrop: GlassBackdrop, enabled: Boolean = true): Modifier =
+    this
+        .onGloballyPositioned { backdrop.contentOrigin = it.positionInWindow() }
+        .drawWithContent {
+            if (enabled) {
+                backdrop.layer.record(
+                    density = this,
+                    layoutDirection = layoutDirection,
+                    size = IntSize(size.width.toInt(), size.height.toInt()),
+                ) {
+                    // 录制发生在 drawWithContent 的接收者上，必须显式指向外层的 ContentDrawScope。
+                    this@drawWithContent.drawContent()
+                }
+            }
+            // 录制归录制，内容本身仍要正常绘制，否则用户会看到空白。
+            drawContent()
         }
-        // 录制归录制，内容本身仍要正常绘制，否则用户会看到空白。
-        drawContent()
-    }
 
 /**
  * 玻璃面板。
@@ -107,6 +114,9 @@ fun Modifier.glassBackdropSource(backdrop: GlassBackdrop): Modifier = this
  * @param shape 面板形状，决定模糊副本被裁剪成的轮廓。
  * @param blurRadius 模糊半径。过大（> 40dp）在低端设备上会明显掉帧。
  * @param tint 玻璃主体着色，建议保持 0.8 以上不透明度，否则下方文字会透上来影响可读性。
+ * @param fluid 流畅模式关闭时传 false：跳过实时模糊，只画不透明材质。
+ *   实时模糊每帧多一次离屏录制 + 全屏模糊，是低端机卡顿的最大来源；
+ *   关闭后玻璃退化为接近不透明的面板，视觉层次保留、帧率恢复。
  */
 @Composable
 fun GlassSurface(
@@ -118,21 +128,20 @@ fun GlassSurface(
     tintFade: Color = MaterialTheme.mealTokens.glassTintFade,
     highlight: Color = MaterialTheme.mealTokens.glassHighlight,
     borderWidth: Dp = 0.8.dp,
+    fluid: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val density = LocalDensity.current
-    val canBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val canBlur = fluid && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val layer = backdrop?.layer
 
     // 模糊效果只设置一次（半径是常量），不放进绘制回调里：
     // 在 draw 阶段修改 layer 属性会与 Compose 的绘制管线互相触发失效。
+    // RenderEffect 仅 API 31+ 可用，此处已有 canBlur 守卫，Lint 经调用处注解确认。
     LaunchedEffect(layer, blurRadius, canBlur) {
         if (layer == null || !canBlur) return@LaunchedEffect
-        val radiusPx = with(density) { blurRadius.toPx() }
-        layer.renderEffect = RenderEffect
-            // CLAMP：把边缘像素向外延伸，避免面板四周出现透明羽化。
-            .createBlurEffect(radiusPx, radiusPx, Shader.TileMode.CLAMP)
-            .asComposeRenderEffect()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@LaunchedEffect
+        applyBlurEffect(layer, with(density) { blurRadius.toPx() })
     }
 
     var panelOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -166,6 +175,21 @@ fun GlassSurface(
             .border(borderWidth, highlight, shape),
         content = content,
     )
+}
+
+/**
+ * 在图层上挂载模糊 `RenderEffect`。
+ *
+ * 调用方必须先确认 API 31+（见 `canBlur`）：`RenderEffect.createBlurEffect`
+ * 在旧版本上根本不存在，直接调用会在类加载时崩溃，`@RequiresApi` 让 Lint
+ * 与调用检查都能确认该前置条件。
+ */
+@RequiresApi(Build.VERSION_CODES.S)
+private fun applyBlurEffect(layer: GraphicsLayer, radiusPx: Float) {
+    layer.renderEffect = RenderEffect
+        // CLAMP：把边缘像素向外延伸，避免面板四周出现透明羽化。
+        .createBlurEffect(radiusPx, radiusPx, Shader.TileMode.CLAMP)
+        .asComposeRenderEffect()
 }
 
 /**

@@ -8,6 +8,7 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.PhotoStore
+import com.fanji.mealnote.data.log.AppLog
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -71,7 +72,6 @@ data class EditRestaurantUiState(
     val notFound: Boolean = false,
     val name: String = "",
     val address: String = "",
-    val status: com.fanji.mealnote.data.local.RestaurantStatus? = null,
     val photoPaths: List<String> = emptyList(),
     val originalCoverPath: String = "",
     /** 本店全部用餐照片，按「最近吃的在前」排序。 */
@@ -91,6 +91,7 @@ data class EditRestaurantUiState(
 class EditRestaurantViewModel @Inject constructor(
     private val repository: MealRepository,
     private val photoStore: PhotoStore,
+    private val appLog: AppLog,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
     private val restaurantId = MutableStateFlow(savedStateHandle.get<Long>(KEY_RESTAURANT_ID))
@@ -116,8 +117,11 @@ class EditRestaurantViewModel @Inject constructor(
         savedStateHandle.contains(KEY_NAME) || savedStateHandle.contains(KEY_PHOTOS)
 
     init {
-        // 持久化职责与新建表单一致：只保存用户可编辑字段，并用 distinctUntilChanged
-        // 过滤掉加载态变化，避免每次按键都写一次 saved instance state。
+        // 只持久化“用户输入”相关字段，并用 distinctUntilChanged 过滤掉加载态变化，
+        // 避免每输入一个字符就产生一次 Bundle 写入。注意不能在这里跳过首帧：
+        // 进程重建场景下首帧就是待恢复的用户输入，跳过会导致重建后改动丢失。
+        // 全新进入与重建恢复的区分统一由构造时捕获的 [restoredFromSavedState] 承担，
+        // 见 [load] 与 [onCleared]。
         viewModelScope.launch {
             _uiState
                 .map { state -> PersistedForm(state.name, state.address, state.photoPaths) }
@@ -141,9 +145,12 @@ class EditRestaurantViewModel @Inject constructor(
      *
      * 若本地已有未提交的编辑内容（进程被回收后重建），则**不覆盖**用户输入，只补齐
      * 初始封面等非用户字段，否则重建会让用户丢失刚输入的内容。
+     *
+     * 注意 `isLoading` 条件：进程重建后 `restaurantId` 已从 [SavedStateHandle] 恢复，
+     * 与传入 id 相等，但数据尚未加载，此时必须继续走 [load]，否则页面永远停在加载中。
      */
     fun setRestaurantId(id: Long) {
-        if (restaurantId.value == id) return
+        if (restaurantId.value == id && !_uiState.value.isLoading) return
         restaurantId.value = id
         savedStateHandle[KEY_RESTAURANT_ID] = id
         viewModelScope.launch { load(id) }
@@ -157,13 +164,15 @@ class EditRestaurantViewModel @Inject constructor(
         }
         // 用餐照片属于数据库侧信息，不是用户输入，因此无论是否从进程重建恢复都要加载。
         val recordPhotos = repository.getPhotoPathsForRestaurant(id)
-        val restored = savedStateHandle.contains(KEY_NAME)
+        // 必须用构造时捕获的 [restoredFromSavedState]，不能在这里查
+        // `savedStateHandle.contains(KEY_NAME)`：`init` 里的持久化协程在构造期间
+        // 就会把空表单写回 handle，此后该判断恒为 true，导致正常进入编辑页也走
+        // “保留用户输入”分支，店名/地址/封面永远是空白——这正是编辑页空白的根因。
         _uiState.update { state ->
-            if (restored) {
+            if (restoredFromSavedState) {
                 // 保留用户输入，只补上数据库侧信息。
                 state.copy(
                     isLoading = false,
-                    status = restaurant.status,
                     originalCoverPath = restaurant.recommendationPhotoPath,
                     recordPhotoPaths = recordPhotos,
                 )
@@ -172,7 +181,6 @@ class EditRestaurantViewModel @Inject constructor(
                     isLoading = false,
                     name = restaurant.name,
                     address = restaurant.address,
-                    status = restaurant.status,
                     originalCoverPath = restaurant.recommendationPhotoPath,
                     recordPhotoPaths = recordPhotos,
                     photoPaths = restaurant.recommendationPhotoPath
@@ -200,7 +208,7 @@ class EditRestaurantViewModel @Inject constructor(
         if (uris.isEmpty()) return
         viewModelScope.launch {
             _uiState.update { it.copy(isImportingPhotos = true, errorMessage = null) }
-            val imported = photoStore.importUris(uris.take(1))
+            val (imported, failure) = photoStore.importUrisWithReason(uris.take(1))
             val newCover = imported.lastOrNull()
             val obsolete = if (newCover == null) {
                 emptyList()
@@ -214,7 +222,7 @@ class EditRestaurantViewModel @Inject constructor(
             }
             _uiState.update { state ->
                 if (newCover == null) {
-                    state.copy(isImportingPhotos = false, errorMessage = IMPORT_FAILED)
+                    state.copy(isImportingPhotos = false, errorMessage = failure.toImportMessage())
                 } else {
                     state.copy(
                         photoPaths = listOf(newCover),
@@ -222,6 +230,9 @@ class EditRestaurantViewModel @Inject constructor(
                         errorMessage = null,
                     )
                 }
+            }
+            if (newCover == null) {
+                appLog.warn("cover", "import failed failure=$failure count=${uris.size}")
             }
             // 状态更新之后再删除文件：先提交状态，避免删除失败时界面与磁盘不一致。
             if (obsolete.isNotEmpty()) photoStore.deleteOwnedPhotos(obsolete)
@@ -365,10 +376,15 @@ class EditRestaurantViewModel @Inject constructor(
     }
 
     private companion object {
-        const val IMPORT_FAILED = "图片导入失败，请重新选择"
         const val KEY_RESTAURANT_ID = "edit_restaurant_id"
         const val KEY_NAME = "edit_restaurant_name"
         const val KEY_ADDRESS = "edit_restaurant_address"
         const val KEY_PHOTOS = "edit_restaurant_photos"
     }
+}
+
+/** 导入失败原因的用户文案，见 AddRestaurantViewModel 处的同名函数说明。 */
+private fun PhotoStore.ImportFailure?.toImportMessage(): String = when (this) {
+    PhotoStore.ImportFailure.NOT_AN_IMAGE -> "所选文件不是有效的图片，请换一张重试"
+    else -> "图片导入失败，请重新选择"
 }

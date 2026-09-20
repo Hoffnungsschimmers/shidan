@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- WebDAV 服务器同步所需。应用本身仍是本地优先：不申请该权限时
+      仅 WebDAV 上传/下载不可用，其余功能不受影响。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:name=".MealNoteApplication"
         android:allowBackup="true"

@@ -98,9 +98,12 @@ fun AnimatedCounter(
  * 新插入的条目需要一个显式的入场动画，否则会「凭空出现」。
  *
  * @param index 在列表中的序号，用于做阶梯延迟（越靠后的条目越晚进场）。
+ * @param enabled 流畅模式关闭时传 false，直接返回原 Modifier，不做任何动画。
+ *   低端机上每个条目的延迟入场 + 位移动画是卡顿的主要来源之一。
  */
 @Composable
-fun Modifier.staggeredEnter(index: Int): Modifier {
+fun Modifier.staggeredEnter(index: Int, enabled: Boolean = true): Modifier {
+    if (!enabled) return this
     var appeared by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay((index.coerceAtMost(MAX_STAGGER_INDEX) * STAGGER_STEP_MS).toLong())

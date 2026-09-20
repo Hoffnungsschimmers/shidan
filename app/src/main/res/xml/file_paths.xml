@@ -13,4 +13,12 @@
     <cache-path
         name="shared"
         path="shared/" />
+
+    <!--
+      WebDAV 上传/下载的中转包：BackupStore.export/restore 只接受 content URI，
+      因此本地中转文件同样经 FileProvider 桥接。文件用完即删，不长期占用缓存。
+    -->
+    <cache-path
+        name="cache_root"
+        path="." />
 </paths>
