@@ -42,6 +42,7 @@ import com.fanji.mealnote.ui.components.MealPhotoSection
 import com.fanji.mealnote.ui.components.MiuixButton
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixTextField
+import com.fanji.mealnote.ui.components.AmountLedgerSection
 import com.fanji.mealnote.ui.components.MiuixTopBar
 import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.SectionHeader
@@ -153,6 +154,17 @@ fun AddVisitScreen(
                         )
                     }
                 }
+            }
+
+            item {
+                AmountLedgerSection(
+                    amountMinor = uiState.effectiveAmountMinor,
+                    personCount = uiState.personCount,
+                    overridden = uiState.amountOverridden,
+                    onPersonCountChange = viewModel::onPersonCountChange,
+                    onAmountManualSet = viewModel::onAmountManualSet,
+                    onAmountAutoRestore = viewModel::onAmountAutoRestore,
+                )
             }
 
             item {

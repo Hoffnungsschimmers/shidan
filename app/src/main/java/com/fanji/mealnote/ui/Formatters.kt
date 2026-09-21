@@ -128,4 +128,18 @@ fun Double.formatEstimatedAmount(): String = when {
     else -> String.format(Locale.US, "¥%.1f万", this / 10_000)
 }
 
+/**
+ * 把**入账金额**（分）格式化为账本文案。
+ *
+ * 与 [formatEstimatedAmount]（估算，刻意抹掉小数）相反，账本口径是精确值：
+ * - 整元时不显示小数：`¥158`；
+ * - 有零头时显示到分并截掉多余的零：`¥158.50`、`¥0.5` → `¥0.5`。
+ *
+ * 刻意不做「万」缩写——账本数字用于核对，可读性让位于精确性；
+ * 统计卡放不下时由调用方自行缩写。
+ */
+fun Long.formatLedgerAmount(): String =
+    if (this % 100 == 0L) "¥${this / 100}"
+    else "¥${toBigDecimal().movePointLeft(2).stripTrailingZeros().toPlainString()}"
+
 private fun Double.roundToLong(): Long = kotlin.math.round(this).toLong()

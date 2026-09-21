@@ -32,6 +32,9 @@ internal const val MAX_PRICE_TEXT_LENGTH = 40
 internal const val MAX_DISHES_LENGTH = 500
 internal const val MAX_NOTE_LENGTH = 2_000
 
+/** 就餐人数上限：再大的桌也少见，越界多半是误输入。 */
+internal const val MAX_PERSON_COUNT = 20
+
 /**
  * 应用唯一的业务数据入口，负责跨表一致性与照片文件生命周期。
  *
@@ -152,6 +155,9 @@ class MealRepository @Inject constructor(
      * 餐厅已被删除这一业务分支，而不是把它当作成功。
      *
      * @param priceText 花费，自由文本，选填。不做数值校验，仅裁剪长度（见 [MAX_PRICE_TEXT_LENGTH]）。
+     * @param amountMinorUnits 入账金额（分），可空 = 「未记金额」。由表单解析或用户手输，
+     *   非正数一律落库为 null（账本里不存在负支出，0 视为未记录，免费餐写备注）。
+     * @param personCount 就餐人数，越界值裁剪到 [1, MAX_PERSON_COUNT]。
      * @return 成功时返回新记录 id。
      */
     suspend fun addDiningRecord(
@@ -162,6 +168,8 @@ class MealRepository @Inject constructor(
         priceText: String,
         note: String,
         photoPaths: List<String>,
+        amountMinorUnits: Long? = null,
+        personCount: Int = 1,
     ): MealResult<Long> {
         val acceptedPhotos = photoPaths.distinct().take(MAX_PHOTOS_PER_RECORD)
         val outcome = runCatchingDb {
@@ -177,6 +185,8 @@ class MealRepository @Inject constructor(
                         dishes = dishes.normalizeText(MAX_DISHES_LENGTH),
                         priceText = priceText.normalizeText(MAX_PRICE_TEXT_LENGTH),
                         note = note.normalizeText(MAX_NOTE_LENGTH),
+                        amountMinorUnits = amountMinorUnits?.takeIf { it > 0 },
+                        personCount = personCount.coerceIn(1, MAX_PERSON_COUNT),
                         createdAt = now,
                     )
                 )
@@ -223,6 +233,8 @@ class MealRepository @Inject constructor(
         priceText: String,
         note: String,
         photoPaths: List<String>,
+        amountMinorUnits: Long? = null,
+        personCount: Int = 1,
     ): MealResult<Unit> {
         val acceptedPhotos = photoPaths.distinct().take(MAX_PHOTOS_PER_RECORD)
         val outcome = runCatchingDb {
@@ -241,6 +253,8 @@ class MealRepository @Inject constructor(
                         dishes = dishes.normalizeText(MAX_DISHES_LENGTH),
                         priceText = priceText.normalizeText(MAX_PRICE_TEXT_LENGTH),
                         note = note.normalizeText(MAX_NOTE_LENGTH),
+                        amountMinorUnits = amountMinorUnits?.takeIf { it > 0 },
+                        personCount = personCount.coerceIn(1, MAX_PERSON_COUNT),
                     )
                 )
                 mealDao.deletePhotosForRecord(recordId)

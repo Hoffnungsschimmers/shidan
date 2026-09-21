@@ -60,7 +60,9 @@ import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import com.fanji.mealnote.ui.components.staggeredEnter
 import com.fanji.mealnote.ui.formatDayLabel
 import com.fanji.mealnote.ui.formatEstimatedAmount
+import com.fanji.mealnote.ui.formatLedgerAmount
 import java.io.File
+import java.math.BigDecimal
 
 /**
  * 「足迹」标签页：以用餐记录为维度的时间线。
@@ -253,12 +255,21 @@ private fun LazyListScope.statsContent(
     }
 
     item(key = "stats-overview") { OverviewCard(uiState) }
+    item(key = "stats-ledger") { LedgerCard(uiState) }
+    if (uiState.ledgerSpendThisYear != null) {
+        item(key = "stats-ledger-monthly") { LedgerMonthlyCard(uiState.ledgerMonthlyAmounts) }
+    }
     item(key = "stats-spend") { SpendCard(uiState) }
     item(key = "stats-monthly") { MonthlyCard(uiState.monthlyCounts) }
     item(key = "stats-verdict") { VerdictCard(uiState) }
     if (uiState.topRestaurants.isNotEmpty()) {
         item(key = "stats-top") {
             TopRestaurantsCard(uiState.topRestaurants, onOpenRestaurant)
+        }
+    }
+    if (uiState.topSpendRestaurants.isNotEmpty()) {
+        item(key = "stats-top-spend") {
+            TopSpendCard(uiState.topSpendRestaurants, onOpenRestaurant)
         }
     }
 }
@@ -531,6 +542,251 @@ private fun TopRestaurantsCard(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(rank.count.toFloat() / peak)
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.primary),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 账本卡：基于**入账金额**的精确口径。
+ *
+ * 与下方「今年花费（估算）」的关系写在文案里：账本只统计逐笔入账（或自动识别）
+ * 的金额，没入账的不硬凑——「还没有入账记录」永远比一个用估算冒充的精确数字诚实。
+ */
+@Composable
+private fun LedgerCard(uiState: FootprintUiState) {
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 2.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        Text(
+            text = "今年吃饭花了多少",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        val year = uiState.ledgerSpendThisYear
+        if (year == null) {
+            Text(
+                text = "还没有入账记录",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "记录时会自动从花费文本识别金额（`128`、`人均60`），也可手动输入。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+        } else {
+            Text(
+                text = year.formatLedgerAmount(),
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                LedgerStatCell("本月", uiState.ledgerSpendThisMonth?.formatLedgerAmount() ?: "—")
+                LedgerStatCell(
+                    "平均每笔",
+                    uiState.ledgerAverageAmount?.formatLedgerAmount() ?: "—",
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            val coverage = uiState.ledgerCoverage
+            Text(
+                text = buildString {
+                    append("今年 ${coverage.recognizedCount} 条已入账")
+                    if (coverage.textOnlyCount > 0) {
+                        append("，另有 ${coverage.textOnlyCount} 条写了花费未入账，可在编辑时补录")
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "只统计入账金额，不含无法识别的记录。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LedgerStatCell(label: String, value: String) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(text = value, style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+/** 最近 12 个月的入账金额。横轴固定规则与次数柱状图完全一致。 */
+@Composable
+private fun LedgerMonthlyCard(monthly: List<MonthlyAmount>) {
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 2.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        Text("最近 12 个月花费", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = "柱高按金额等比，只画入账记录。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(18.dp))
+        LedgerAmountChart(monthly)
+    }
+}
+
+@Composable
+private fun LedgerAmountChart(monthly: List<MonthlyAmount>) {
+    val peak = (monthly.maxOfOrNull { it.amountMinor ?: 0L } ?: 0L).coerceAtLeast(1L)
+    // 同次数柱状图：图表结构上全是 Box，屏幕阅读器需要整体描述而不是逐柱数字。
+    val summary = remember(monthly) {
+        monthly.filter { it.amountMinor != null }
+            .joinToString("，") { "${it.label} ${it.amountMinor!!.formatLedgerAmount()}" }
+            .ifEmpty { "最近 12 个月没有入账记录" }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clearAndSetSemantics { contentDescription = summary },
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        monthly.forEachIndexed { index, month ->
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Bottom,
+            ) {
+                val amount = month.amountMinor
+                Text(
+                    // 金额太长会挤爆柱宽：数字用缩写口径（1.2万），只在有值时显示。
+                    text = amount?.let { compactLedgerAmount(it) } ?: "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(4.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(
+                            if (amount != null && peak > 0L) {
+                                (MAX_BAR_HEIGHT * (amount.toFloat() / peak)).coerceAtLeast(6.dp)
+                            } else {
+                                3.dp
+                            },
+                        )
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(
+                            if (amount != null) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.outlineVariant
+                            },
+                        ),
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = if (index % 2 == 0 || index == monthly.lastIndex) month.label else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** 柱顶数字的紧凑口径：整元去小数，超过一万用「万」（与展示金额的缩写规则一致）。 */
+private fun compactLedgerAmount(amountMinor: Long): String = when {
+    amountMinor >= 1_000_000L -> {
+        val wan = BigDecimal(amountMinor)
+            .divide(BigDecimal(1_000_000), 1, java.math.RoundingMode.HALF_UP)
+        "¥${wan.stripTrailingZeros().toPlainString()}万"
+    }
+    amountMinor % 100 == 0L -> "¥${amountMinor / 100}"
+    else -> amountMinor.formatLedgerAmount()
+}
+
+/** 花钱最多的店。无障碍写法与「去得最多的店」一致。 */
+@Composable
+private fun TopSpendCard(
+    spends: List<RestaurantSpend>,
+    onOpenRestaurant: (Long) -> Unit,
+) {
+    val peak = spends.firstOrNull()?.amountMinor ?: 1L
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 2.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        Text("花钱最多的店", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(14.dp))
+        spends.forEachIndexed { index, spend ->
+            if (index > 0) Spacer(Modifier.height(14.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenRestaurant(spend.restaurantId) }
+                    .clearAndSetSemantics {
+                        contentDescription =
+                            "第 ${index + 1} 名 ${spend.restaurantName}，累计 ${spend.amountMinor.formatLedgerAmount()}，入账 ${spend.visitCount} 笔"
+                        role = Role.Button
+                        onClick(label = "查看店铺") {
+                            onOpenRestaurant(spend.restaurantId)
+                            true
+                        }
+                    },
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${index + 1}",
+                        modifier = Modifier.width(20.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = spend.restaurantName,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = spend.amountMinor.formatLedgerAmount(),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clearAndSetSemantics { },
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(spend.amountMinor.toFloat() / peak.toFloat())
                             .fillMaxSize()
                             .background(MaterialTheme.colorScheme.primary),
                     )

@@ -39,11 +39,27 @@ object DatabaseModule {
         }
     }
 
+    /**
+     * v3 → v4：用餐记录增加结构化金额与人数（吃饭账本的数据基础）。
+     *
+     * - `amountMinorUnits`：**可空**列，**不带 DEFAULT** —— SQLite 会给历史行填 NULL，
+     *   语义即「未记金额」。Room 全新建表时该列同样无默认值，两边等价，
+     *   因此实体上**不写** `@ColumnInfo(defaultValue)`。
+     * - `personCount`：`NOT NULL DEFAULT 1`，历史行语义为「未填人数按 1 人计」。
+     *   实体上的 `@ColumnInfo(defaultValue = "1")` 必须与这里**逐字一致**。
+     */
+    val Migration3To4: Migration = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE dining_records ADD COLUMN amountMinorUnits INTEGER")
+            db.execSQL("ALTER TABLE dining_records ADD COLUMN personCount INTEGER NOT NULL DEFAULT 1")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "meal_note.db")
-            .addMigrations(Migration1To2, Migration2To3)
+            .addMigrations(Migration1To2, Migration2To3, Migration3To4)
             .build()
 
     @Provides

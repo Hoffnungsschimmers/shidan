@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.fanji.mealnote.data.MAX_PERSON_COUNT
 import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
@@ -325,6 +326,10 @@ class BackupStore @Inject constructor(
                     // v3 新增。旧版应用读取本包时会忽略该字段（org.json 不校验未知键），
                     // 因此不需要提升 FORMAT_VERSION。
                     put("priceText", record.priceText)
+                    // v4 新增：入账金额（分）与人数。金额为空时**不写键**，
+                    // 比写 null 更干净，旧版读取时也天然忽略。
+                    record.amountMinorUnits?.let { put("amountMinorUnits", it) }
+                    put("personCount", record.personCount)
                     put("note", record.note)
                     put("createdAt", record.createdAt)
                 }
@@ -465,6 +470,10 @@ class BackupStore @Inject constructor(
                 dishes = item.optString("dishes"),
                 // v1/v2 的备份包没有该字段，optString 返回空串，正好等于「未填写」的语义。
                 priceText = item.optString("priceText"),
+                // v4 字段：v3 及更早的包没有 → 金额为空（未记金额），人数按 1 计。
+                amountMinorUnits = (item.opt("amountMinorUnits") as? Number)
+                    ?.toLong()?.takeIf { it > 0 },
+                personCount = item.optInt("personCount", 1).coerceIn(1, MAX_PERSON_COUNT),
                 note = item.optString("note"),
                 createdAt = item.optLong("createdAt", System.currentTimeMillis()),
             )

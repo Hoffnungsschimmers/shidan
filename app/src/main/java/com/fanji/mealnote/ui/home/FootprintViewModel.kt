@@ -80,6 +80,19 @@ data class FootprintUiState(
     val monthlyCounts: List<MonthlyCount> = emptyList(),
     /** 常去的店，按次数倒序，最多 5 家。 */
     val topRestaurants: List<RestaurantRank> = emptyList(),
+    // ------------------------------------------------------------ 账本（入账金额口径）
+    /** 今年的入账总额（分）；没有任何入账记录时为 `null`（区别于 0）。 */
+    val ledgerSpendThisYear: Long? = null,
+    /** 本月的入账总额（分）；同上。 */
+    val ledgerSpendThisMonth: Long? = null,
+    /** 平均每笔入账金额（分）；无入账记录时为 `null`。 */
+    val ledgerAverageAmount: Long? = null,
+    /** 最近 12 个月的入账金额，从最早到最新。 */
+    val ledgerMonthlyAmounts: List<MonthlyAmount> = emptyList(),
+    /** 花钱最多的店，按累计入账金额倒序，最多 5 家。 */
+    val topSpendRestaurants: List<RestaurantSpend> = emptyList(),
+    /** 今年的入账覆盖情况（已入账几条 / 写了花费未入账几条）。 */
+    val ledgerCoverage: LedgerCoverage = LedgerCoverage(0, 0),
 ) {
     /** 用户输入了关键字但没有任何匹配。 */
     val isSearchMiss: Boolean get() = query.isNotBlank() && sections.isEmpty()
@@ -154,6 +167,15 @@ class FootprintViewModel @Inject constructor(
             },
             monthlyCounts = all.toMonthlyCounts(today, zone),
             topRestaurants = all.toTopRestaurants(),
+            ledgerSpendThisYear = all.ledgerSpendIn(currentYear, zone),
+            ledgerSpendThisMonth = all.filter {
+                it.record.eatenAt.toYearMonth(zone) == today
+            }.mapNotNull { it.ledgerAmountMinor() }
+                .takeIf { it.isNotEmpty() }?.sum(),
+            ledgerAverageAmount = all.ledgerAverageAmount(),
+            ledgerMonthlyAmounts = all.ledgerMonthlyAmounts(today, zone),
+            topSpendRestaurants = all.toTopSpendRestaurants(),
+            ledgerCoverage = all.ledgerCoverageIn(currentYear, zone),
         )
     }.stateIn(
         scope = viewModelScope,

@@ -4,12 +4,15 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.fanji.mealnote.data.MAX_PERSON_COUNT
 import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.PhotoStore
+import com.fanji.mealnote.data.detectPersonCount
 import com.fanji.mealnote.data.log.AppLog
 import com.fanji.mealnote.data.local.Verdict
+import com.fanji.mealnote.data.parseLedgerAmountMinor
 import com.fanji.mealnote.ui.visit.MAX_VISIT_PHOTOS
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +43,11 @@ data class EditVisitUiState(
     val note: String = "",
     val photoPaths: List<String> = emptyList(),
     val originalPhotoPaths: List<String> = emptyList(),
+    val personCount: Int = 1,
+    /** 用户手动指定的入账金额（分），仅 [amountOverridden] 为 true 时生效。 */
+    val amountMinorUnits: Long? = null,
+    val amountOverridden: Boolean = false,
+    val personCountTouched: Boolean = false,
     val isImportingPhotos: Boolean = false,
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
@@ -49,6 +57,11 @@ data class EditVisitUiState(
 
     val canSave: Boolean
         get() = !isLoading && !notFound && !isImportingPhotos && !isSaving && !saved
+
+    /** 入账金额：手动覆盖优先，否则从花费文本自动识别（派生属性，永不错过同步）。 */
+    val effectiveAmountMinor: Long?
+        get() = if (amountOverridden) amountMinorUnits
+        else parseLedgerAmountMinor(priceText, personCount)
 }
 
 @HiltViewModel
@@ -70,6 +83,10 @@ class EditVisitViewModel @Inject constructor(
             priceText = savedStateHandle.get<String>(KEY_PRICE).orEmpty(),
             note = savedStateHandle.get<String>(KEY_NOTE).orEmpty(),
             photoPaths = savedStateHandle.get<ArrayList<String>>(KEY_PHOTOS).orEmpty(),
+            personCount = savedStateHandle.get<Int>(KEY_PERSON)?.coerceIn(1, MAX_PERSON_COUNT) ?: 1,
+            personCountTouched = savedStateHandle.get<Boolean>(KEY_PERSON_TOUCHED) == true,
+            amountMinorUnits = savedStateHandle.get<Long>(KEY_AMOUNT),
+            amountOverridden = savedStateHandle.get<Boolean>(KEY_AMOUNT_MANUAL) == true,
         )
     )
     val uiState: StateFlow<EditVisitUiState> = _uiState.asStateFlow()
@@ -97,6 +114,10 @@ class EditVisitViewModel @Inject constructor(
                         priceText = state.priceText,
                         note = state.note,
                         photoPaths = state.photoPaths,
+                        personCount = state.personCount,
+                        personCountTouched = state.personCountTouched,
+                        amountMinorUnits = state.amountMinorUnits,
+                        amountOverridden = state.amountOverridden,
                     )
                 }
                 .distinctUntilChanged()
@@ -107,6 +128,11 @@ class EditVisitViewModel @Inject constructor(
                     savedStateHandle[KEY_PRICE] = persisted.priceText
                     savedStateHandle[KEY_NOTE] = persisted.note
                     savedStateHandle[KEY_PHOTOS] = ArrayList(persisted.photoPaths)
+                    savedStateHandle[KEY_PERSON] = persisted.personCount
+                    savedStateHandle[KEY_PERSON_TOUCHED] = persisted.personCountTouched
+                    savedStateHandle[KEY_AMOUNT_MANUAL] = persisted.amountOverridden
+                    persisted.amountMinorUnits?.let { savedStateHandle[KEY_AMOUNT] = it }
+                        ?: savedStateHandle.remove<Long>(KEY_AMOUNT)
                 }
         }
     }
@@ -118,6 +144,10 @@ class EditVisitViewModel @Inject constructor(
         val priceText: String,
         val note: String,
         val photoPaths: List<String>,
+        val personCount: Int,
+        val personCountTouched: Boolean,
+        val amountMinorUnits: Long?,
+        val amountOverridden: Boolean,
     )
 
     /** 注入路由参数并加载现有记录。进程重建时保留用户已输入的内容。 */
@@ -160,6 +190,12 @@ class EditVisitViewModel @Inject constructor(
                     note = existing.record.note,
                     photoPaths = orderedPaths,
                     originalPhotoPaths = orderedPaths,
+                    personCount = existing.record.personCount,
+                    // 已落库的人数 > 1 说明当初就是明确填过人数的，不再从文本重新探测。
+                    personCountTouched = existing.record.personCount > 1,
+                    // 已有入账金额按「用户确认过」对待，保留原值；为空则继续自动识别。
+                    amountMinorUnits = existing.record.amountMinorUnits,
+                    amountOverridden = existing.record.amountMinorUnits != null,
                 )
             }
         }
@@ -175,7 +211,38 @@ class EditVisitViewModel @Inject constructor(
         _uiState.update { it.copy(dishes = value, errorMessage = null) }
 
     fun onPriceChange(value: String) =
-        _uiState.update { it.copy(priceText = value, errorMessage = null) }
+        _uiState.update { state ->
+            // 与 AddVisitViewModel.onPriceChange 同一规则：未手改人数时从文本顺带探测人数。
+            val people = if (state.personCountTouched) {
+                state.personCount
+            } else {
+                detectPersonCount(value) ?: 1
+            }
+            state.copy(priceText = value, personCount = people, errorMessage = null)
+        }
+
+    fun onPersonCountChange(value: Int) =
+        _uiState.update {
+            it.copy(
+                personCount = value.coerceIn(1, MAX_PERSON_COUNT),
+                personCountTouched = true,
+                errorMessage = null,
+            )
+        }
+
+    /** 用户手动输入入账金额（分）；null = 明确「这顿不记金额」。覆盖自动识别。 */
+    fun onAmountManualSet(amountMinorUnits: Long?) =
+        _uiState.update {
+            it.copy(
+                amountMinorUnits = amountMinorUnits?.takeIf { cents -> cents > 0 },
+                amountOverridden = true,
+                errorMessage = null,
+            )
+        }
+
+    /** 放弃手动金额，恢复「从花费文本自动识别」。 */
+    fun onAmountAutoRestore() =
+        _uiState.update { it.copy(amountMinorUnits = null, amountOverridden = false) }
 
     fun onNoteChange(value: String) =
         _uiState.update { it.copy(note = value, errorMessage = null) }
@@ -259,6 +326,8 @@ class EditVisitViewModel @Inject constructor(
                 priceText = snapshot.priceText,
                 note = snapshot.note,
                 photoPaths = snapshot.photoPaths,
+                amountMinorUnits = snapshot.effectiveAmountMinor,
+                personCount = snapshot.personCount,
             )) {
                 is MealResult.Success ->
                     _uiState.update { it.copy(isSaving = false, saved = true) }
@@ -303,6 +372,10 @@ class EditVisitViewModel @Inject constructor(
         const val KEY_PRICE = "edit_visit_price"
         const val KEY_NOTE = "edit_visit_note"
         const val KEY_PHOTOS = "edit_visit_photos"
+        const val KEY_PERSON = "edit_visit_person"
+        const val KEY_PERSON_TOUCHED = "edit_visit_person_touched"
+        const val KEY_AMOUNT = "edit_visit_amount"
+        const val KEY_AMOUNT_MANUAL = "edit_visit_amount_manual"
     }
 }
 

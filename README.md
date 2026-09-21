@@ -4,9 +4,9 @@
 
 ## 当前状态
 
-项目处于 V0.4 阶段。在 V0.3（核心记录流程、管理能力、备份恢复、界面重做）
-之上，本版修复旧设备上的编辑空白与相册导入失败，并新增运行日志、
-流畅模式与 WebDAV 服务器同步。详见 [CHANGELOG.md](CHANGELOG.md) 的 0.4.0 节。
+项目处于 V0.5 阶段。在 V0.4（运行日志、流畅模式、WebDAV 同步）之上，
+本版落地「记账」核心：为每餐加一层结构化入账金额（schema v3 → v4），
+并在足迹页给出精确口径的账本统计。详见 [CHANGELOG.md](CHANGELOG.md) 的 0.5.0 节。
 
 **信息架构**（底部三栏）
 
@@ -145,9 +145,9 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 
 | 检查项 | 状态 |
 |---|---|
-| `testDebugUnitTest` | 98 个用例全部通过，0 失败 0 错误 |
+| `testDebugUnitTest` | 141 个用例全部通过，0 失败 0 错误 |
 | `lintDebug` | 通过（0 错误） |
-| `assembleDebug` | 通过（versionCode 13，versionName 0.4.0） |
+| `assembleDebug` | 通过（versionCode 14，versionName 0.5.0） |
 | `assembleRelease` | 通过（R8 混淆 + 资源裁剪，v2 签名已验证） |
 
 数据库版本 3，`identityHash` = `9a477c043b56c97eb725b6ad2011a9ed`。

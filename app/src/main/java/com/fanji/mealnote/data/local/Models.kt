@@ -139,6 +139,28 @@ data class DiningRecordEntity(
     @ColumnInfo(defaultValue = "''")
     val priceText: String = "",
 
+    /**
+     * 结构化金额（单位：分），v4 新增，可空。
+     *
+     * 与 [priceText] 的关系：自由文本永远是用户写下的原文（展示用），
+     * 本列是**账本口径**——整数分，避免浮点误差进入备份与报表。
+     * `null` 表示「未记金额」，与「这顿 0 元」严格区分（免费餐请写进备注）；
+     * 报表在 [priceText] 有值但本列为空时，归入「写的是文字、无法换算」。
+     *
+     * 迁移 [DatabaseModule.Migration3To4] 中该列**不带 DEFAULT**（可空列默认即 NULL），
+     * 与全新安装生成的表结构等价，因此这里**不写** `@ColumnInfo(defaultValue)`。
+     */
+    val amountMinorUnits: Long? = null,
+
+    /**
+     * 就餐人数，v4 新增。默认 1。
+     *
+     * 用于把「人均 X」换算成桌价入账（见 `data.parseLedgerAmountMinor`）。
+     * 迁移 SQL 的 `DEFAULT 1` 必须与下面的 [ColumnInfo.defaultValue] 逐字一致。
+     */
+    @ColumnInfo(defaultValue = "1")
+    val personCount: Int = 1,
+
     /** 附录：环境、服务或其他补充感受，选填。 */
     val note: String = "",
 
