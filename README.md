@@ -136,7 +136,10 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
   com.fanji.mealnote.data.backup.BackupEntryNameSafetyTest \
   com.fanji.mealnote.ui.edit.ReclaimableFormPhotosTest \
   com.fanji.mealnote.ui.visit.VisitPrefillTest \
-  com.fanji.mealnote.ui.home.FootprintAggregationTest
+  com.fanji.mealnote.ui.home.FootprintAggregationTest \
+  com.fanji.mealnote.ui.home.LedgerAggregationTest \
+  com.fanji.mealnote.ui.home.RandomScopeFilterTest \
+  com.fanji.mealnote.data.webdav.WebDavUrlSafetyTest
 ```
 
 依赖 jar 位于 `~/.gradle/caches/modules-2/files-2.1/` 下。
@@ -145,12 +148,12 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 
 | 检查项 | 状态 |
 |---|---|
-| `testDebugUnitTest` | 141 个用例全部通过，0 失败 0 错误 |
+| `testDebugUnitTest` | 181 个用例全部通过，0 失败 0 错误 |
 | `lintDebug` | 通过（0 错误） |
-| `assembleDebug` | 通过（versionCode 14，versionName 0.5.0） |
+| `assembleDebug` | 通过（versionCode 15，versionName 0.5.1） |
 | `assembleRelease` | 通过（R8 混淆 + 资源裁剪，v2 签名已验证） |
 
-数据库版本 3，`identityHash` = `9a477c043b56c97eb725b6ad2011a9ed`。
+数据库版本 4，`identityHash` = `b93fd210509db5642fb4c1aed52f6a14`。
 
 ### 数据库迁移
 
@@ -158,14 +161,20 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 |---|---|
 | 1 → 2 | `restaurants` 增加 `recommendationPhotoPath`（封面图） |
 | 2 → 3 | `dining_records` 增加 `priceText`（花费，自由文本） |
+| 3 → 4 | `dining_records` 增加 `amountMinorUnits`（入账金额，分）与 `personCount`（人数） |
 
 `Migration2To3` 使用 `ALTER TABLE ... ADD COLUMN priceText TEXT NOT NULL DEFAULT ''`。
 实体上的 `@ColumnInfo(defaultValue = "''")` 与迁移中的 `DEFAULT ''` **必须逐字一致**：
 迁移后的表结构要与全新安装完全等价，否则 Room 的 schema 校验会在老用户升级时
 抛出 `Migration didn't properly handle`。
 
-该等价性可以在本机用内存 SQLite 验证（无需设备）：用 `app/schemas/.../2.json` 的
-`createSql` 建表、执行迁移 SQL、再用 `3.json` 的 `createSql` 建一张表，比对两者
+`Migration3To4` 加两列，两列的**默认值处理不同**，加新列时注意区分：
+`amountMinorUnits` 是可空列且**不带 DEFAULT**（历史行即为 NULL = 「未记金额」），
+实体上因此**不写** `@ColumnInfo(defaultValue)`；`personCount` 是
+`NOT NULL DEFAULT 1`，实体上必须写 `@ColumnInfo(defaultValue = "1")`。
+
+该等价性可以在本机用内存 SQLite 验证（无需设备）：用 `app/schemas/.../3.json` 的
+`createSql` 建表、执行迁移 SQL、再用 `4.json` 的 `createSql` 建一张表，比对两者
 `PRAGMA table_info` 的 name / type / notNull / pk / defaultValue。实测差异为空。
 
 ## 代码分层

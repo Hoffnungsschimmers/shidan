@@ -80,7 +80,7 @@ class WebDavStore @Inject constructor(
             )
         } catch (error: WebDavHttpException) {
             appLog.warn("webdav", "upload failed code=${error.code}")
-            MealResult.Failure(error.toMealError("上传失败"))
+            MealResult.Failure(error.toMealError("上传失败", config))
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -116,7 +116,7 @@ class WebDavStore @Inject constructor(
             } catch (error: WebDavHttpException) {
                 appLog.warn("webdav", "download failed code=${error.code}")
                 @Suppress("UNCHECKED_CAST")
-                MealResult.Failure(error.toMealError("下载失败")) as MealResult<com.fanji.mealnote.data.backup.RestoreSummary>
+                MealResult.Failure(error.toMealError("下载失败", config)) as MealResult<com.fanji.mealnote.data.backup.RestoreSummary>
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -252,13 +252,33 @@ class WebDavStore @Inject constructor(
 
     private class WebDavHttpException(val code: Int) : IOException("WebDAV http $code")
 
-    private fun WebDavHttpException.toMealError(prefix: String): MealError = when (code) {
-        401, 403 -> MealError.InvalidInput("账号或密码错误，请检查后重试")
-        404 -> MealError.InvalidInput("服务器上还没有备份，请先上传")
-        -1 -> MealError.InvalidInput("服务器上的备份文件过大，无法下载")
-        -2 -> MealError.InvalidInput("服务器重定向地址不安全，已中止")
-        -3 -> MealError.InvalidInput("服务器要求跳转，请检查地址后重试")
-        else -> MealError.PhotoIoFailure
+    /**
+     * HTTP 错误 → 用户可见文案。
+     *
+     * 文案里**必须带上实际请求的地址**：404 有两种完全不同的成因——「真的还没传过」与
+     * 「地址拼错了一个斜杠」，只说「服务器上还没有备份」时用户无法区分，只能来回试。
+     * 回显的是用户自己在设置里填的那串地址，不是新泄露的信息；
+     * 唯一要洗掉的是可能被写进 URL 的 `user:pass@` 凭据（见 [remoteUrlForDisplay]）。
+     *
+     * `prefix` 不能丢：`MealError.InvalidInput` 的 reason 会被原样透传，
+     * 上层不会再拼操作名，少了它「找不到文件」就分不清是上传还是下载。
+     */
+    private fun WebDavHttpException.toMealError(prefix: String, config: WebDavConfig): MealError {
+        val target = config.remoteUrlForDisplay()
+        return when (code) {
+            401, 403 -> MealError.InvalidInput("$prefix：账号或密码错误，请检查后重试")
+            404 -> {
+                val anonymous = if (config.username.isBlank()) "（未填写用户名，本次为匿名请求）" else ""
+                MealError.InvalidInput(
+                    "$prefix：服务器上找不到 $target$anonymous。" +
+                        "若该目录不存在，请先在服务器上建好，并核对地址末尾是否已经带了文件名"
+                )
+            }
+            -1 -> MealError.InvalidInput("$prefix：服务器上的文件过大，无法下载（$target）")
+            -2 -> MealError.InvalidInput("$prefix：服务器重定向到不安全地址，已中止")
+            -3 -> MealError.InvalidInput("$prefix：服务器要求跳转，请检查地址后重试（$target）")
+            else -> MealError.PhotoIoFailure
+        }
     }
 
     private companion object {
@@ -269,6 +289,33 @@ class WebDavStore @Inject constructor(
     }
 }
 
-/** 脱敏后的主机名，用于日志。 */
+/**
+ * 去掉 URL 中 `user:pass@` 形式的凭据。
+ *
+ * 两处都要用：错误提示需要**回显完整路径**（那正是用户排查拼错的东西），
+ * 运行日志只保留主机名。两者都不能顺手把口令显示出来 —— 有人习惯把凭据直接写进地址栏。
+ *
+ * internal 而非 private：这条是隐私红线，用测试锁住比靠 review 可靠。
+ */
+internal fun redactUrlCredentials(url: String): String {
+    val schemeEnd = url.indexOf("://")
+    if (schemeEnd < 0) return url
+    val authorityStart = schemeEnd + 3
+    val authorityEnd = url.indexOf('/', authorityStart).takeIf { it >= 0 } ?: url.length
+    val at = url.lastIndexOf('@', authorityEnd - 1)
+    if (at < authorityStart) return url
+    return url.substring(0, authorityStart) +
+        url.substring(at + 1, authorityEnd) +
+        url.substring(authorityEnd)
+}
+
+/** 回显给用户核对的目标地址：保留路径，只洗掉凭据。 */
+private fun WebDavConfig.remoteUrlForDisplay(): String = redactUrlCredentials(remoteUrl())
+
+/** 脱敏后的主机名，用于日志（去掉凭据与端口）。 */
 private fun WebDavConfig.displayHost(): String =
-    serverUrl.substringBefore('/').ifBlank { serverUrl }
+    redactUrlCredentials(serverUrl)
+        .substringAfter("://")
+        .substringBefore('/')
+        .substringBeforeLast(':')
+        .ifBlank { "未知主机" }

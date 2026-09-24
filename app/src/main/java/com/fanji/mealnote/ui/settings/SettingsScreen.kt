@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -43,7 +44,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fanji.mealnote.BuildConfig
 import com.fanji.mealnote.data.backup.BackupFormat
+import com.fanji.mealnote.data.settings.RANDOM_EXCLUDE_DAY_OPTIONS
+import com.fanji.mealnote.data.settings.RandomScope
 import com.fanji.mealnote.data.settings.ThemeMode
+import com.fanji.mealnote.data.settings.randomExcludeDaysLabel
 import com.fanji.mealnote.ui.components.ConfirmDialog
 import com.fanji.mealnote.ui.components.MessageBanner
 import com.fanji.mealnote.ui.components.MiuixCard
@@ -81,19 +85,16 @@ fun SettingsScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let(viewModel::requestImport) }
 
-    // 提示语自动消失，避免用户离开本页后仍看到过期的“已导出”信息。
+    // 成功提示自动消失，避免用户离开本页后仍看到过期的「已导出」。
     LaunchedEffect(uiState.message) {
         if (uiState.message != null) {
             delay(MESSAGE_DURATION_MS)
             viewModel.consumeMessage()
         }
     }
-    LaunchedEffect(uiState.errorMessage) {
-        if (uiState.errorMessage != null) {
-            delay(MESSAGE_DURATION_MS)
-            viewModel.consumeError()
-        }
-    }
+    // 失败提示**不自动消失**：4 秒横幅等于没提示 —— WebDAV 上传失败后用户看不到原因，
+    // 只会隔几分钟再点一次下载，然后收到一句「服务器上还没有备份」，两头都对不上。
+    // 保留 consumeError 出口，由用户点「知道了」关闭。
 
     Column(modifier = Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize()) {
@@ -157,6 +158,66 @@ fun SettingsScreen(
                                 subtitle = if (fluid) "已开启" else "已关闭，界面更省电",
                                 trailingText = if (fluid) "开" else "关",
                                 onClick = { viewModel.setFluidMotion(!fluid) },
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    val randomConfig by viewModel.randomConfig.collectAsStateWithLifecycle()
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        SectionHeader(
+                            title = "随机选店",
+                            subtitle = "清单页「不知道吃啥？随机选一家」按什么范围抽店",
+                        )
+                        MiuixCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            elevation = 2.dp,
+                            contentPadding = PaddingValues(14.dp),
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                // 分段控件本身只有选项文字，不说明它管什么，
+                                // 因此每一组都要有一行说明——不能靠位置让用户猜。
+                                FieldCaption("评价范围：按每家店最近一次的评价")
+                                MiuixSegmented(
+                                    options = RandomScope.entries.toList(),
+                                    selected = randomConfig.scope,
+                                    onSelect = viewModel::setRandomScope,
+                                    label = { it.label },
+                                )
+                            }
+                        }
+                        MiuixCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            elevation = 2.dp,
+                            contentPadding = PaddingValues(14.dp),
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                FieldCaption("排除最近吃过的店")
+                                MiuixSegmented(
+                                    options = RANDOM_EXCLUDE_DAY_OPTIONS,
+                                    selected = randomConfig.excludeRecentDays,
+                                    onSelect = viewModel::setRandomExcludeRecentDays,
+                                    label = { randomExcludeDaysLabel(it) },
+                                )
+                            }
+                        }
+                        MiuixCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            elevation = 2.dp,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                        ) {
+                            val includeWant = randomConfig.includeWantToList
+                            MiuixListRow(
+                                icon = Icons.Rounded.Storefront,
+                                title = "待探访参与随机",
+                                subtitle = if (includeWant) {
+                                    "还没吃过的店也进候选池"
+                                } else {
+                                    "只从有评价的店里抽"
+                                },
+                                trailingText = if (includeWant) "开" else "关",
+                                onClick = { viewModel.setRandomIncludeWant(!includeWant) },
                             )
                         }
                     }
@@ -347,7 +408,14 @@ fun SettingsScreen(
                     }
                 }
                 uiState.message?.let { MessageBanner(it) }
-                uiState.errorMessage?.let { MessageBanner(it) }
+                uiState.errorMessage?.let {
+                    MessageBanner(
+                        message = it,
+                        destructive = true,
+                        actionLabel = "知道了",
+                        onAction = viewModel::consumeError,
+                    )
+                }
             }
         }
     }
@@ -397,6 +465,21 @@ private fun RowDivider() {
         modifier = Modifier.padding(start = 56.dp),
         thickness = 1.dp,
         color = MaterialTheme.colorScheme.outlineVariant,
+    )
+}
+
+/**
+ * 卡片内部分项的说明行。
+ *
+ * 只用于「控件本身没有文字标签」的场合（如分段控件）：一组选项摆在那里不说明它管什么，
+ * 就等于把理解成本推给用户。沿用既有的 `labelLarge` + 次级文字色，不引入新色值。
+ */
+@Composable
+private fun FieldCaption(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 

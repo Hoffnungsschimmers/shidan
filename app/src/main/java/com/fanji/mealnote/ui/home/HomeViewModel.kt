@@ -5,12 +5,15 @@ import androidx.lifecycle.viewModelScope
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.local.RestaurantEntity
 import com.fanji.mealnote.data.local.RestaurantStatus
+import com.fanji.mealnote.data.settings.RandomPreference
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import java.time.LocalDate
+import java.time.ZoneId
 import javax.inject.Inject
 
 /** 首页列表的状态筛选维度。顺序即界面中标签的展示顺序。 */
@@ -25,6 +28,10 @@ enum class HomeFilter(val label: String) {
  *
  * [restaurants] 为已应用筛选与搜索后的结果；`*Count` 系列始终基于**全量数据**计算，
  * 因此筛选标签上的数字不会随当前筛选条件抖动。
+ *
+ * [randomCandidates] 与 [restaurants] **刻意不是同一批数据**：随机池来自全量店铺并按
+ * 用户在设置页配置的评价范围筛选，不受当前分段与搜索词影响（见 `RandomPick.kt`）。
+ * 为空时界面隐藏随机按钮。
  */
 data class HomeUiState(
     val restaurants: List<RestaurantEntity> = emptyList(),
@@ -33,6 +40,8 @@ data class HomeUiState(
     val totalCount: Int = 0,
     val wantCount: Int = 0,
     val eatenCount: Int = 0,
+    val randomCandidates: List<RestaurantEntity> = emptyList(),
+    val randomScopeDescription: String = "",
     val isLoading: Boolean = true,
 ) {
     /** 当前查询无匹配结果且用户确实输入了关键字，用于区分“空数据”与“搜不到”。 */
@@ -45,23 +54,40 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     repository: MealRepository,
+    randomPreference: RandomPreference,
 ) : ViewModel() {
     private val _query = MutableStateFlow("")
     private val _filter = MutableStateFlow(HomeFilter.WANT_TO_EAT)
 
     val uiState: StateFlow<HomeUiState> = combine(
         repository.observeRestaurants(),
+        repository.observeAllDiningRecords(),
         _query,
         _filter,
-    ) { restaurants, query, filter ->
+        randomPreference.config,
+    ) { restaurants, records, query, filter, randomConfig ->
         val keyword = query.trim()
+        // 时钟每次发射只读一次并作为参数传给纯函数：既避免同一帧内两次读到不同的日期
+        // 让池子和列表自相矛盾，也让纯函数本身可在测试里固定到任意日期。
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        // 餐品名与随机池用的是同一条记录流，这次扩展没有增加任何数据库查询。
+        val dishNames = dishNamesByRestaurant(records)
         HomeUiState(
-            restaurants = restaurants.filter { it.matches(keyword, filter) },
+            restaurants = restaurants.filter { it.matches(keyword, filter, dishNames[it.id].orEmpty()) },
             query = query,
             filter = filter,
             totalCount = restaurants.size,
             wantCount = restaurants.count { it.status == RestaurantStatus.WANT_TO_EAT },
             eatenCount = restaurants.count { it.status == RestaurantStatus.EATEN },
+            randomCandidates = buildRandomCandidatePool(
+                restaurants = restaurants,
+                latestVisits = latestVisitByRestaurant(records),
+                config = randomConfig,
+                today = today,
+                zone = zone,
+            ),
+            randomScopeDescription = randomConfig.candidateScopeDescription(),
             isLoading = false,
         )
     }.stateIn(
@@ -76,24 +102,6 @@ class HomeViewModel @Inject constructor(
 
     fun onFilterChange(filter: HomeFilter) {
         _filter.value = filter
-    }
-
-    /**
-     * 判断某条餐厅是否同时满足状态筛选与关键字搜索。
-     *
-     * 关键字同时匹配店名与地址；空关键字视为全部匹配。抽成扩展函数便于单元测试覆盖，
-     * 也避免在 combine 的 lambda 中堆叠条件分支。
-     */
-    private fun RestaurantEntity.matches(keyword: String, filter: HomeFilter): Boolean {
-        val matchesStatus = when (filter) {
-            HomeFilter.WANT_TO_EAT -> status == RestaurantStatus.WANT_TO_EAT
-            HomeFilter.EATEN -> status == RestaurantStatus.EATEN
-            HomeFilter.ALL -> true
-        }
-        if (!matchesStatus) return false
-        if (keyword.isEmpty()) return true
-        return name.contains(keyword, ignoreCase = true) ||
-            address.contains(keyword, ignoreCase = true)
     }
 
     private companion object {

@@ -227,12 +227,17 @@ fun MessageBanner(
     modifier: Modifier = Modifier,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    destructive: Boolean = false,
 ) {
+    // 失败信息与成功信息不能长得一样：整块换成错误色容器，
+    // 与「危险操作整行变色」是同一约定（不只靠文字变红表达状态）。
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.inverseSurface,
-        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+        color = if (destructive) MaterialTheme.colorScheme.errorContainer
+        else MaterialTheme.colorScheme.inverseSurface,
+        contentColor = if (destructive) MaterialTheme.colorScheme.onErrorContainer
+        else MaterialTheme.colorScheme.inverseOnSurface,
         shadowElevation = 8.dp,
     ) {
         Row(
@@ -244,7 +249,9 @@ fun MessageBanner(
                 TextButton(
                     onClick = onAction,
                     colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.inversePrimary,
+                        // 动作色跟着容器走：错误色容器上配 inversePrimary 会失去对比度保证。
+                        contentColor = if (destructive) MaterialTheme.colorScheme.onErrorContainer
+                        else MaterialTheme.colorScheme.inversePrimary,
                     ),
                 ) { Text(actionLabel) }
             }

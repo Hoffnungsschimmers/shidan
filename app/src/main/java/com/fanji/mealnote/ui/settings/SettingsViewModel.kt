@@ -9,6 +9,9 @@ import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.backup.BackupStore
 import com.fanji.mealnote.data.log.AppLog
 import com.fanji.mealnote.data.settings.MotionPreference
+import com.fanji.mealnote.data.settings.RandomPickConfig
+import com.fanji.mealnote.data.settings.RandomPreference
+import com.fanji.mealnote.data.settings.RandomScope
 import com.fanji.mealnote.data.settings.ThemeMode
 import com.fanji.mealnote.data.settings.ThemePreference
 import com.fanji.mealnote.data.webdav.WebDavConfig
@@ -54,6 +57,7 @@ class SettingsViewModel @Inject constructor(
     private val backupStore: BackupStore,
     private val themePreference: ThemePreference,
     private val motionPreference: MotionPreference,
+    private val randomPreference: RandomPreference,
     private val webDavPreference: WebDavPreference,
     private val webDavStore: WebDavStore,
     private val appLog: AppLog,
@@ -83,6 +87,20 @@ class SettingsViewModel @Inject constructor(
 
     /** 切换流畅模式，立即生效，下次启动保持。 */
     fun setFluidMotion(value: Boolean) = motionPreference.setFluid(value)
+
+    /**
+     * 随机选店的候选配置。
+     *
+     * 同样直接暴露偏好的 Flow：清单页的随机池订阅的是**同一个** [RandomPreference.config]，
+     * 复制一份进页面状态会让「设置页显示的范围」与「清单页实际抽店用的范围」有机会不一致。
+     */
+    val randomConfig: StateFlow<RandomPickConfig> = randomPreference.config
+
+    fun setRandomScope(scope: RandomScope) = randomPreference.setScope(scope)
+
+    fun setRandomIncludeWant(value: Boolean) = randomPreference.setIncludeWantToList(value)
+
+    fun setRandomExcludeRecentDays(days: Int) = randomPreference.setExcludeRecentDays(days)
 
     init {
         refreshStats()

@@ -90,7 +90,7 @@ fun WantListScreen(
                 MealSearchField(
                     value = uiState.query,
                     onValueChange = viewModel::onQueryChange,
-                    placeholder = "搜索店名或地址",
+                    placeholder = "搜索店名、地址或餐品",
                 )
                 MiuixSegmented(
                     options = HomeFilter.entries.toList(),
@@ -123,13 +123,14 @@ fun WantListScreen(
             )
         }
 
-        // 「随机选一家」只在待探访列表非空时出现：它是用来解决「不知道吃哪家」的，
-        // 在已用餐/全部视图下没有意义，出现反而会让操作区变吵。
-        if (uiState.filter == HomeFilter.WANT_TO_EAT && uiState.restaurants.isNotEmpty() && uiState.query.isBlank()) {
+        // 随机按钮跟随**候选池**而不是当前列表：池子按设置页配置的评价范围算，
+        // 与分段、搜索词无关（搜索结果里再随机一次是双重随机，用户只会觉得莫名其妙）。
+        // 池为空时不显示按钮 —— 「点了没反应」比「看不见」更糟。
+        if (uiState.randomCandidates.isNotEmpty()) {
             item(key = "random") {
                 MiuixButton(
                     label = "不知道吃啥？随机选一家",
-                    onClick = { randomPick = uiState.restaurants.randomOrNull() },
+                    onClick = { randomPick = uiState.randomCandidates.randomOtherThan(null) },
                     icon = Icons.Rounded.Shuffle,
                     style = MiuixButtonStyle.Tonal,
                     height = 48.dp,
@@ -165,7 +166,7 @@ fun WantListScreen(
                         else -> "还没有任何记录"
                     },
                     message = if (uiState.isSearchMiss) {
-                        "换个关键词试试，或者直接把这家店加进来。"
+                        "换个关键词试试，店名、地址、吃过的餐品都能搜。"
                     } else {
                         "先把想去的店记下来，之后再补上评价。"
                     },
@@ -193,11 +194,12 @@ fun WantListScreen(
     randomPick?.let { pick ->
         RandomPickDialog(
             pick = pick,
+            scopeDescription = uiState.randomScopeDescription,
             onOpen = {
                 randomPick = null
                 onOpenRestaurant(pick.id)
             },
-            onReroll = { randomPick = uiState.restaurants.randomOrNull() },
+            onReroll = { randomPick = uiState.randomCandidates.randomOtherThan(pick) },
             onDismiss = { randomPick = null },
         )
     }
@@ -279,10 +281,14 @@ private fun SectionTitleRow(title: String, count: Int) {
 
 /**
  * 随机选店结果：封面 + 店名 + 地址 + 状态，比纯文字弹窗更像“推荐”。
+ *
+ * [scopeDescription] 必须显示：用户把范围设成「仅推荐」却抽到一家从没去过的店时，
+ * 第一反应是范围没生效。写上「含待探访」就不用他猜，也不用我们来解释 bug。
  */
 @Composable
 private fun RandomPickDialog(
     pick: RestaurantEntity,
+    scopeDescription: String,
     onOpen: () -> Unit,
     onReroll: () -> Unit,
     onDismiss: () -> Unit,
@@ -296,7 +302,11 @@ private fun RandomPickDialog(
             Text("今天就吃这家", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(4.dp))
             Text(
-                "从当前待探访里随机挑的，不合适就换一家。",
+                text = if (scopeDescription.isBlank()) {
+                    "随机挑的，不合适就换一家。"
+                } else {
+                    "$scopeDescription，不合适就换一家。"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
