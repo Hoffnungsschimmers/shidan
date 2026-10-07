@@ -1,26 +1,32 @@
-# 味笺
+# 食单
 
-味笺是一款本地优先的 Android 餐厅收藏与用餐记录应用。它可以快速保存想去的店，并用「推荐 / 尚可 / 不推荐」、餐品名字、**花费**、照片和可选附录记录每次用餐。
+食单（曾用名「味笺」「饭记」）是一款本地优先的 Android 餐厅收藏与用餐记录应用。它可以快速保存想去的店，并用「推荐 / 尚可 / 不推荐」、餐品名字、**花费**、照片和可选附录记录每次用餐。
 
 ## 当前状态
 
-项目处于 V0.5 阶段。在 V0.4（运行日志、流畅模式、WebDAV 同步）之上，
-本版落地「记账」核心：为每餐加一层结构化入账金额（schema v3 → v4），
-并在足迹页给出精确口径的账本统计。详见 [CHANGELOG.md](CHANGELOG.md) 的 0.5.0 节。
+最新版本 **v0.6.0（versionCode 16）**——同时是改名「食单」后的第一版：
+「暖食欲 · 图为主」视觉全域重做，加上账本 CSV 导出、每月预算、清单排序、备份新鲜度、
+WebDAV 连通性检查、重复店名提醒、年度回顾卡片、单店累计入账。上一版 v0.5.1（15）是随机选店
+按评价范围 + 搜索覆盖餐品名；v0.5.0（14）落地记账核心（结构化入账金额，schema v3 → v4）。
+
+> ⚠️ v0.6.0 **只过了编译与 JVM 测试，没有在真机上跑过一次，也未出包交付到 `apk/`**。
+> 排版、深色模式、大字体裁字、TalkBack、流畅模式降级外观一律未经确认；
+> WebDAV 同步与连通性检查尚未在真实服务器上验证通过（AGENTS §5-3 的发布门槛仍未解锁）。
+> 逐项明细见 `CHANGELOG.md` 0.6.0 节。
 
 **信息架构**（底部三栏）
 
 | 标签 | 回答的问题 |
 |---|---|
-| **清单** | 还有什么想吃的 / 哪些店去过了（含搜索、分段筛选、随机选一家） |
-| **足迹** | 我吃过什么、评价如何、花了多少（时间线 ⇄ 统计两个视角） |
-| **我的** | 备份导出、恢复、存储占用、清理与清空数据、关于 |
+| **清单** | 还有什么想吃的 / 哪些店去过了（搜索**含餐品名**、分段筛选、随机选一家按评价范围） |
+| **足迹** | 我吃过什么、评价如何、花了多少（时间线 ⇄ 统计两个视角，统计内含账本） |
+| **我的** | 备份导出与恢复、WebDAV 同步、外观与流畅模式、随机选店范围、运行日志、存储管理、关于 |
 
 「足迹」内含两个分段：
 
 - **时间线**：按月份分组、组内按时间倒序；
-- **统计**：今年次数 / 去过的店 / 累计次数、花费估算、最近 12 个月柱状图、
-  评价分布、去得最多的店 Top 5。
+- **统计**：今年次数 / 去过的店 / 累计次数、花费估算、**入账金额口径的账本卡**、
+  最近 12 个月柱状图、评价分布、去得最多的店 Top 5。
 
 > 花费是自由文本，统计值由 `String.parseEstimatedAmount()` 从文本中取**最大**的数字估算
 > （`人均60` → 60、`3个人吃了240` → 240）。界面明确标注为「估算」并显示可识别比例，
@@ -46,7 +52,7 @@
 
 **界面**
 
-- MIUIx / HyperOS 风格：中性冷灰底、纯白浮层、大圆角、柔和投影、弹簧动效；
+- **暖食欲 · 图为主**视觉（继承 MIUIx / HyperOS 的浮层与弹簧语言）：暖米白底、纯白浮层、大圆角、柔和暖棕投影、弹簧动效；封面图承担卡片锚点，缺图退化为「暖光渐变 + 店名首字」；
 - 底部导航栏、详情页顶栏与操作栏使用 **Liquid Glass** 玻璃材质；
   API 31+ 为真实背景模糊（`GraphicsLayer` + `RenderEffect`），低版本自动降级为拟态玻璃；
 - 全屏照片查看器：左右滑动切换、双击缩放、放大后拖动平移；
@@ -108,18 +114,21 @@ C:\Users\2540\mealnote-workspace  ->  C:\Users\2540\Desktop\mealnote
 
 若出现 `build-cache-1\*.part (拒绝访问)` 之类的缓存写入失败，可追加 `--no-build-cache` 绕过。
 
-### 已知环境问题：单元测试类路径
+### 已知环境问题：单元测试类路径（2026-10-06 复测未复现）
 
-本机执行 `testDebugUnitTest` 时，所有测试类都会在装载阶段报
+历史上本机执行 `testDebugUnitTest` 时，所有测试类都会在装载阶段报
 `java.lang.ClassNotFoundException ... at initializationError`（注意是**全部**测试类，
-而非某一个断言失败）。
-
-原因：AGP 的 `bundleDebugClassesToRuntimeJar` 产物
+而非某一个断言失败）。原因：AGP 的 `bundleDebugClassesToRuntimeJar` 产物
 （`app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntimeJar/classes.jar`）
-未被加入测试工作进程的运行时类路径，测试代码因此看不到主源码集中的类。
-这与被测代码无关。
+未被加入测试工作进程的运行时类路径，测试代码因此看不到主源码集中的类——这与被测代码无关。
 
-在该问题修复前，可改用 JDK 直接运行同一批测试（结果等价）：
+**2026-10-06 用 `--rerun` 强制实跑，28 套件 / 252 例全部通过，问题未再出现。**
+日常跑测试用 `scripts/run-unit-tests.ps1`（自动发现测试类，无需维护清单）；
+下面的 JDK 直跑命令保留为**备用路径**，仅在换机或该问题复发时使用。
+
+在该问题修复前，可改用 JDK 直接运行同一批测试（结果等价）。**首选跑法是
+`scripts/run-unit-tests.ps1`**：它从 `app/src/test/java` 自动发现测试类，不需要维护下面的
+类清单，也就不可能漂移。下面的手工命令是备用路径，用它才必须同步清单。
 
 ```bash
 "$JDK17/bin/java.exe" \
@@ -127,31 +136,55 @@ C:\Users\2540\mealnote-workspace  ->  C:\Users\2540\Desktop\mealnote
 app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntimeJar/classes.jar;\
 <junit-4.13.2.jar>;<kotlin-stdlib.jar>;<hamcrest-core-1.3.jar>" \
   org.junit.runner.JUnitCore \
+  com.fanji.mealnote.data.AmountParsingTest \
   com.fanji.mealnote.data.MealResultTest \
   com.fanji.mealnote.data.MealTextTest \
   com.fanji.mealnote.data.local.ConvertersTest \
-  com.fanji.mealnote.ui.FormattersTest \
-  com.fanji.mealnote.ui.home.HomeFilterTest \
-  com.fanji.mealnote.data.PendingPhotoCleanupConcurrencyTest \
   com.fanji.mealnote.data.backup.BackupEntryNameSafetyTest \
+  com.fanji.mealnote.data.export.CsvExportSafetyTest \
+  com.fanji.mealnote.data.settings.BackupFreshnessTest \
+  com.fanji.mealnote.data.settings.BudgetPreferenceParseTest \
+  com.fanji.mealnote.data.webdav.WebDavProbeTest \
+  com.fanji.mealnote.data.webdav.WebDavUrlSafetyTest \
+  com.fanji.mealnote.ui.FormattersTest \
+  com.fanji.mealnote.ui.add.DuplicateNameCheckTest \
+  com.fanji.mealnote.ui.detail.DetailStatsTest \
   com.fanji.mealnote.ui.edit.ReclaimableFormPhotosTest \
   com.fanji.mealnote.ui.visit.VisitPrefillTest \
+  com.fanji.mealnote.ui.home.HomeFilterTest \
   com.fanji.mealnote.ui.home.FootprintAggregationTest \
+  com.fanji.mealnote.ui.home.FootprintSearchAndMonthTest \
+  com.fanji.mealnote.ui.home.CountInMonthTest \
   com.fanji.mealnote.ui.home.LedgerAggregationTest \
+  com.fanji.mealnote.ui.home.LedgerSumTest \
+  com.fanji.mealnote.ui.home.VisitCountsTest \
+  com.fanji.mealnote.ui.home.VerdictFilterTest \
+  com.fanji.mealnote.ui.home.BudgetProgressTest \
+  com.fanji.mealnote.ui.home.YearlySummaryTest \
+  com.fanji.mealnote.ui.home.YearReviewTest \
   com.fanji.mealnote.ui.home.RandomScopeFilterTest \
-  com.fanji.mealnote.data.webdav.WebDavUrlSafetyTest
+  com.fanji.mealnote.ui.home.RestaurantSortTest
 ```
 
 依赖 jar 位于 `~/.gradle/caches/modules-2/files-2.1/` 下。
 
+> 上面这份类清单**只服务于备用路径**，日常不需要维护：`scripts/run-unit-tests.ps1` 从源码
+> 自动发现测试类。若确实改走了手工命令，才需要同步这里的清单与计数
+> （`grep -rc "@Test" app/src/test` 可数；本项目历史上因手工清单漂移失守过三次，故改为脚本）。
+
 ## 构建状态
+
+以下为 **2026-10-07 改名与升版后**对当前代码的实测结果：
 
 | 检查项 | 状态 |
 |---|---|
-| `testDebugUnitTest` | 181 个用例全部通过，0 失败 0 错误 |
-| `lintDebug` | 通过（0 错误） |
-| `assembleDebug` | 通过（versionCode 15，versionName 0.5.1） |
-| `assembleRelease` | 通过（R8 混淆 + 资源裁剪，v2 签名已验证） |
+| `testDebugUnitTest`（`--rerun` 强制实跑） | 28 个套件 / 252 个用例全部通过，0 失败 0 错误 |
+| `scripts/run-unit-tests.ps1` | 同上（从源码发现 28 个测试类，`OK (252 tests)`） |
+| `lintDebug` | 通过，报告 `No issues found` |
+| `assembleDebug` | 通过（versionCode 16，versionName 0.6.0，label 食单）；产物仅在 `app/build/outputs/`，**未复制进 `apk/`** |
+| `assembleRelease` | 通过（R8 混淆 + 资源裁剪），`apksigner verify` 退出码 0，签名者 `CN=MealNote` |
+
+> 构建能过 ≠ 功能可用：本机无真机/模拟器，**UI 与 WebDAV 远程路径均未经验证**（见 ROADMAP 第七/九节）。
 
 数据库版本 4，`identityHash` = `b93fd210509db5642fb4c1aed52f6a14`。
 
