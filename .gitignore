@@ -4,6 +4,9 @@
 .kotlin/
 .mimosa/
 **/.mimosa/
+.zcode/
+**/.zcode/
+.zcodeignore
 build/
 local.properties
 captures/
@@ -14,3 +17,6 @@ captures/
 *.keystore
 *.jks
 .DS_Store
+
+# 陈旧 Agent 记忆（停在 v0.3.9，会误导协作者与 Agent；磁盘保留，不入库）
+.workbuddy-ai/
