@@ -128,6 +128,106 @@ class WebDavStore @Inject constructor(
             }
         }
 
+    // ------------------------------------------------------------ 连通性检查
+
+    /**
+     * 测试与 WebDAV 服务器的连通性,不改动任何数据。
+     *
+     * 对远端文件发一个 HEAD 请求,把结果分成:可连接且已有备份 / 可连接但尚无备份 /
+     * 账号密码错误 / 需跳转(地址问题)/ 连不上。让用户不必靠试上传下载来排错
+     * (这是 ROADMAP 点名的痛点:首次用 WebDAV 直接撞 404,毫无线索)。
+     *
+     * 返回 [MealResult.Success] 携带一句可展示的提示;失败携带错误文案(界面常驻显示)。
+     */
+    suspend fun testConnection(): MealResult<String> = withContext(Dispatchers.IO) {
+        val config = preference.config.value
+        if (!config.isConfigured) {
+            return@withContext MealResult.Failure(MealError.InvalidInput("请先填写 WebDAV 服务器地址"))
+        }
+        if (!isAllowedScheme(config.serverUrl)) {
+            return@withContext MealResult.Failure(
+                MealError.InvalidInput("仅支持 https 地址（局域网可用 http 内网地址）"),
+            )
+        }
+        val target = config.remoteUrlForDisplay()
+        try {
+            val connection = openConnection(config, "HEAD", config.remoteUrl())
+            try {
+                val code = connection.responseCode
+                // 只有文件侧说「没有」时，才值得再问一次目录 —— 单个 404 分不清
+                // 「还没上传过」和「目录不存在」，而这两种情况用户要做的事正好相反。
+                val collectionCode = if (webDavProbeFor(code) == WebDavProbe.FILE_ABSENT) {
+                    collectionStatusCode(config)
+                } else {
+                    null
+                }
+                appLog.info(
+                    "webdav",
+                    "probe code=$code collection=$collectionCode host=${config.displayHost()}",
+                )
+                when (classifyWebDavProbe(code, collectionCode)) {
+                    WebDavProbe.FILE_EXISTS ->
+                        MealResult.Success("连接正常，服务器上已有备份，可直接「从服务器恢复」。")
+                    WebDavProbe.FILE_ABSENT ->
+                        MealResult.Success(
+                            "连接正常，但该地址上还没有备份文件。首次使用请先「上传」；" +
+                                "若你确信已上传过，请核对地址与文件名：$target",
+                        )
+                    WebDavProbe.COLLECTION_ABSENT ->
+                        MealResult.Failure(
+                            MealError.InvalidInput(
+                                "连接测试：服务器上还没有这个目录：" +
+                                    redactUrlCredentials(config.serverUrl.trimEnd('/')) +
+                                    "。WebDAV 不会在上传时顺带创建父目录，" +
+                                    "请先在服务器上建好该目录，再点「上传当前数据」",
+                            ),
+                        )
+                    WebDavProbe.AUTH_FAILED ->
+                        MealResult.Failure(MealError.InvalidInput("连接测试：账号或密码错误，请检查后重试"))
+                    WebDavProbe.REDIRECT ->
+                        MealResult.Failure(MealError.InvalidInput("连接测试：服务器要求跳转，请检查地址（$target）"))
+                    WebDavProbe.UNREACHABLE ->
+                        MealResult.Failure(
+                            MealError.InvalidInput("连接测试：服务器返回异常（HTTP $code），请检查地址（$target）"),
+                        )
+                }
+            } finally {
+                connection.disconnect()
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            appLog.warn("webdav", "probe failed error=${error.javaClass.simpleName}")
+            MealResult.Failure(
+                MealError.InvalidInput("连接测试：无法连接服务器，请检查网络与地址（$target）"),
+            )
+        }
+    }
+
+    /**
+     * 对目录本身发一次 HEAD，只取状态码；拿不到时返回 null。
+     *
+     * **只在文件侧返回 404 时才发这第二个请求。** 单个 404 有两种完全不同的成因：
+     * 目录压根不存在（WebDAV 不会在 PUT 时顺带创建父目录，坚果云一类服务器最常见的
+     * 首次配置失败就是这样），与目录通了但那个文件名下面确实还没有备份。
+     * 两者要做的事相反——一个是「先去服务器上建目录」，一个是「直接点上传」，
+     * 合成一句提示就会把用户推向错误方向。
+     *
+     * 其余状态下这个请求没有任何信息量，所以不发：不为对称而多打一次网络。
+     */
+    private fun collectionStatusCode(config: WebDavConfig): Int? = try {
+        val connection = openConnection(config, "HEAD", config.serverUrl.trimEnd('/'))
+        try {
+            connection.responseCode
+        } finally {
+            connection.disconnect()
+        }
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (error: IOException) {
+        null
+    }
+
     // ------------------------------------------------------------ 内部实现
 
     private fun checkConfig(config: WebDavConfig): MealResult<Nothing>? {
@@ -174,7 +274,7 @@ class WebDavStore @Inject constructor(
     }
 
     private suspend fun putFile(config: WebDavConfig, file: File) {
-        val connection = openConnection(config, "PUT")
+        val connection = openConnection(config, "PUT", config.remoteUrl())
         try {
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/zip")
@@ -190,7 +290,7 @@ class WebDavStore @Inject constructor(
     }
 
     private suspend fun getFile(config: WebDavConfig, target: File) {
-        val connection = openConnection(config, "GET")
+        val connection = openConnection(config, "GET", config.remoteUrl())
         try {
             val code = connection.responseCode
             if (code !in 200..299) throw redirectAwareError(connection, code)
@@ -216,8 +316,8 @@ class WebDavStore @Inject constructor(
         }
     }
 
-    private fun openConnection(config: WebDavConfig, method: String): HttpURLConnection {
-        val connection = URL(config.remoteUrl()).openConnection() as HttpURLConnection
+    private fun openConnection(config: WebDavConfig, method: String, url: String): HttpURLConnection {
+        val connection = URL(url).openConnection() as HttpURLConnection
         connection.requestMethod = method
         connection.connectTimeout = TIMEOUT_MS
         connection.readTimeout = TIMEOUT_MS
@@ -288,6 +388,45 @@ class WebDavStore @Inject constructor(
         const val MAX_DOWNLOAD_BYTES = 512L * 1024 * 1024
     }
 }
+
+/**
+ * 连通性检查把 HTTP 状态归成五类(纯逻辑,便于单测)。
+ *
+ * - 2xx(含 WebDAV 的 207 Multi-Status)→ 文件存在;
+ * - 404 → 文件/目录不存在(可首次上传,或地址拼错);
+ * - 401/403 → 认证失败;
+ * - 3xx → 需跳转(不自动跟随,提示检查地址);
+ * - 其它 → 视为连不上/异常。
+ */
+internal enum class WebDavProbe {
+    FILE_EXISTS,
+    FILE_ABSENT,
+
+    /** 文件与所在目录都 404：真正的问题是目录不存在，不是「还没传过」。 */
+    COLLECTION_ABSENT,
+    AUTH_FAILED,
+    REDIRECT,
+    UNREACHABLE,
+}
+
+internal fun webDavProbeFor(code: Int): WebDavProbe = when {
+    code in 200..299 -> WebDavProbe.FILE_EXISTS
+    code == 404 -> WebDavProbe.FILE_ABSENT
+    code == 401 || code == 403 -> WebDavProbe.AUTH_FAILED
+    code in 300..399 -> WebDavProbe.REDIRECT
+    else -> WebDavProbe.UNREACHABLE
+}
+
+/**
+ * 文件侧 404 时再看目录侧一眼。
+ *
+ * 两边都 404 = 目录不存在。这个区分只有两个状态码同时在场才判得出来，
+ * 所以它是纯映射、可在 JVM 上钉死；[collectionCode] 为 null（没发第二次请求）时
+ * 完全退化为 [webDavProbeFor]，不改变任何既有结论。
+ */
+internal fun classifyWebDavProbe(fileCode: Int, collectionCode: Int?): WebDavProbe =
+    if (fileCode == 404 && collectionCode == 404) WebDavProbe.COLLECTION_ABSENT
+    else webDavProbeFor(fileCode)
 
 /**
  * 去掉 URL 中 `user:pass@` 形式的凭据。

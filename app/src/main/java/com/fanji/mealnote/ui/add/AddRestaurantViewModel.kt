@@ -8,13 +8,17 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.PhotoStore
+import com.fanji.mealnote.data.local.RestaurantEntity
 import com.fanji.mealnote.data.log.AppLog
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
@@ -67,6 +71,22 @@ class AddRestaurantViewModel @Inject constructor(
     )
     val uiState: StateFlow<AddRestaurantUiState> = _uiState.asStateFlow()
 
+    /** 现有餐厅列表快照,用于重复店名提醒。 */
+    private val restaurants = MutableStateFlow<List<RestaurantEntity>>(emptyList())
+
+    /**
+     * 与当前输入的店名同名的现有店铺名;无则为 null。
+     *
+     * 单独暴露而不折进 [uiState]:它由「现有列表 + 当前输入」派生,折进 uiState 会与
+     * 表单持久化流互相触发。界面据此显示一句非阻塞提醒,用户仍可执意保存(同名分店合法)。
+     */
+    val duplicateName: StateFlow<String?> = combine(
+        restaurants,
+        _uiState.map { it.name }.distinctUntilChanged(),
+    ) { list, name ->
+        list.findDuplicateName(name)?.name
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
+
     /**
      * 本实例是否由系统回收后的状态恢复而来。
      *
@@ -80,6 +100,10 @@ class AddRestaurantViewModel @Inject constructor(
         savedStateHandle.contains(KEY_NAME) || savedStateHandle.contains(KEY_PHOTOS)
 
     init {
+        // 订阅现有餐厅,供重复店名提醒使用。
+        viewModelScope.launch {
+            repository.observeRestaurants().collect { restaurants.value = it }
+        }
         // 只持久化“用户输入”相关字段，并用 distinctUntilChanged 过滤掉加载态变化，
         // 避免每输入一个字符就产生一次 Bundle 写入（SavedStateHandle 的写入最终会
         // 落到 Activity 的 saved instance state，过于频繁会拖慢输入响应）。

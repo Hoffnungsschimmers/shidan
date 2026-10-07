@@ -3,6 +3,9 @@ package com.fanji.mealnote.ui.home
 import com.fanji.mealnote.data.local.DiningRecordEntity
 import com.fanji.mealnote.data.local.RestaurantEntity
 import com.fanji.mealnote.data.local.RestaurantStatus
+import com.fanji.mealnote.data.settings.RestaurantSort
+import java.text.Collator
+import java.util.Locale
 
 /**
  * 「清单」页的筛选与搜索规则。
@@ -42,6 +45,10 @@ internal fun dishNamesByRestaurant(records: List<DiningRecordEntity>): Map<Long,
     return dishes
 }
 
+/** 按餐厅统计用餐次数(记录条数)。用于清单里「去过 N 次」的展示,与餐品索引共用同一条记录流。 */
+internal fun visitCountsByRestaurant(records: List<DiningRecordEntity>): Map<Long, Int> =
+    records.groupingBy { it.restaurantId }.eachCount()
+
 /**
  * 这家店是否同时满足状态筛选与关键字搜索。
  *
@@ -64,3 +71,28 @@ internal fun RestaurantEntity.matches(
     if (address.contains(keyword, ignoreCase = true)) return true
     return dishNames.any { it.contains(keyword, ignoreCase = true) }
 }
+
+/**
+ * 按 [mode] 对清单排序。
+ *
+ * - [RestaurantSort.RECENT_UPDATED]:按 `updatedAt` 倒序(与数据库默认顺序一致);
+ * - [RestaurantSort.RECENT_ADDED]:按 `createdAt` 倒序;
+ * - [RestaurantSort.NAME]:用 [Collator](中文按本地化顺序,英文按字典序),同名再按 `updatedAt` 倒序稳定。
+ *
+ * 抽成纯函数便于单测;时间戳相等时都以 `id` 兜底,保证结果稳定不抖动。
+ */
+internal fun List<RestaurantEntity>.sortedForList(mode: RestaurantSort): List<RestaurantEntity> =
+    when (mode) {
+        RestaurantSort.RECENT_UPDATED ->
+            sortedWith(compareByDescending<RestaurantEntity> { it.updatedAt }.thenByDescending { it.id })
+        RestaurantSort.RECENT_ADDED ->
+            sortedWith(compareByDescending<RestaurantEntity> { it.createdAt }.thenByDescending { it.id })
+        RestaurantSort.NAME -> {
+            val collator = Collator.getInstance(Locale.CHINA)
+            sortedWith(
+                compareBy(collator) { r: RestaurantEntity -> r.name }
+                    .thenByDescending { it.updatedAt },
+            )
+        }
+    }
+

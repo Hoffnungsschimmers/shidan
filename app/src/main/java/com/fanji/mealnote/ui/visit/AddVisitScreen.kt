@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Payments
 import androidx.compose.material.icons.rounded.RestaurantMenu
@@ -40,6 +41,7 @@ import com.fanji.mealnote.ui.components.FormErrorLine
 import com.fanji.mealnote.ui.components.MealDateRow
 import com.fanji.mealnote.ui.components.MealPhotoSection
 import com.fanji.mealnote.ui.components.MiuixButton
+import com.fanji.mealnote.ui.components.MiuixButtonStyle
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixTextField
 import com.fanji.mealnote.ui.components.AmountLedgerSection
@@ -72,6 +74,9 @@ fun AddVisitScreen(
     val restaurantName by viewModel.restaurantName.collectAsStateWithLifecycle()
     val photoViewer = rememberPhotoViewerState()
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
+    // 「记账金额、就餐人数、补充记录」默认折叠：新记录里它们多为选填,先只露核心字段,
+    // 让「记一餐」保持简短;需要时一键展开。金额仍会从花费文本自动识别并入账,折叠不丢数据。
+    var showMore by rememberSaveable { mutableStateOf(false) }
     // 保存相机目标文件路径而非 File 对象：拍照期间进程可能被回收，
     // 普通 remember 无法保存不可序列化的 File，重建后会丢失拍摄结果的关联。
     var pendingCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
@@ -157,17 +162,6 @@ fun AddVisitScreen(
             }
 
             item {
-                AmountLedgerSection(
-                    amountMinor = uiState.effectiveAmountMinor,
-                    personCount = uiState.personCount,
-                    overridden = uiState.amountOverridden,
-                    onPersonCountChange = viewModel::onPersonCountChange,
-                    onAmountManualSet = viewModel::onAmountManualSet,
-                    onAmountAutoRestore = viewModel::onAmountAutoRestore,
-                )
-            }
-
-            item {
                 MealPhotoSection(
                     title = "照片",
                     subtitle = "选填，最多 $MAX_VISIT_PHOTOS 张",
@@ -186,15 +180,38 @@ fun AddVisitScreen(
                 )
             }
 
-            item {
-                MiuixTextField(
-                    value = uiState.note,
-                    onValueChange = viewModel::onNoteChange,
-                    label = "补充记录（选填）",
-                    placeholder = "环境、服务、下次想点什么，随便写",
-                    minLines = 3,
-                    maxLines = 6,
-                )
+            if (showMore) {
+                item {
+                    AmountLedgerSection(
+                        amountMinor = uiState.effectiveAmountMinor,
+                        personCount = uiState.personCount,
+                        overridden = uiState.amountOverridden,
+                        onPersonCountChange = viewModel::onPersonCountChange,
+                        onAmountManualSet = viewModel::onAmountManualSet,
+                        onAmountAutoRestore = viewModel::onAmountAutoRestore,
+                    )
+                }
+
+                item {
+                    MiuixTextField(
+                        value = uiState.note,
+                        onValueChange = viewModel::onNoteChange,
+                        label = "补充记录（选填）",
+                        placeholder = "环境、服务、下次想点什么，随便写",
+                        minLines = 3,
+                        maxLines = 6,
+                    )
+                }
+            } else {
+                item {
+                    MiuixButton(
+                        label = "记账金额、就餐人数、备注（选填）",
+                        onClick = { showMore = true },
+                        style = MiuixButtonStyle.Text,
+                        icon = Icons.Rounded.Add,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
 
             item { FormErrorLine(message = uiState.errorMessage) }

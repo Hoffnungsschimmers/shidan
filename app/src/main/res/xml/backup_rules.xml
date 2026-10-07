@@ -2,4 +2,6 @@
 <full-backup-content>
     <exclude domain="file" path="photos/" />
     <exclude domain="database" path="meal_note.db" />
+    <!-- mealnote_webdav 存有 WebDAV 账号密码，禁止随系统备份离开设备（AGENTS §6） -->
+    <exclude domain="sharedpref" path="mealnote_webdav.xml" />
 </full-backup-content>

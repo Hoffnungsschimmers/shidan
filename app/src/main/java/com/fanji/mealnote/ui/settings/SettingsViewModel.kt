@@ -7,8 +7,12 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.backup.BackupStore
+import com.fanji.mealnote.data.export.LedgerCsvStore
 import com.fanji.mealnote.data.log.AppLog
+import com.fanji.mealnote.data.settings.BackupStatePreference
+import com.fanji.mealnote.data.settings.BudgetPreference
 import com.fanji.mealnote.data.settings.MotionPreference
+import com.fanji.mealnote.data.settings.parseBudgetYuanToMinor
 import com.fanji.mealnote.data.settings.RandomPickConfig
 import com.fanji.mealnote.data.settings.RandomPreference
 import com.fanji.mealnote.data.settings.RandomScope
@@ -46,6 +50,8 @@ data class SettingsUiState(
     val showClearDataDialog: Boolean = false,
     /** 待分享的日志文本；非空时界面发起系统分享，消费后复位。 */
     val pendingLogText: String? = null,
+    /** 是否展示「设置每月预算」对话框。 */
+    val showBudgetDialog: Boolean = false,
 ) {
     /** 无数据时禁用导出与清空，避免产生空备份或误触。 */
     val canExport: Boolean get() = !isBusy && !isLoading && restaurantCount > 0
@@ -55,9 +61,12 @@ data class SettingsUiState(
 class SettingsViewModel @Inject constructor(
     private val repository: MealRepository,
     private val backupStore: BackupStore,
+    private val ledgerCsvStore: LedgerCsvStore,
     private val themePreference: ThemePreference,
     private val motionPreference: MotionPreference,
     private val randomPreference: RandomPreference,
+    private val budgetPreference: BudgetPreference,
+    private val backupStatePreference: BackupStatePreference,
     private val webDavPreference: WebDavPreference,
     private val webDavStore: WebDavStore,
     private val appLog: AppLog,
@@ -101,6 +110,25 @@ class SettingsViewModel @Inject constructor(
     fun setRandomIncludeWant(value: Boolean) = randomPreference.setIncludeWantToList(value)
 
     fun setRandomExcludeRecentDays(days: Int) = randomPreference.setExcludeRecentDays(days)
+
+    /** 上次成功备份/上传时间(epoch millis;0=从未),设置页据此提示新鲜度。 */
+    val lastBackupAt: StateFlow<Long> = backupStatePreference.lastBackupAt
+
+    /**
+     * 每月预算(分)。直接暴露偏好 Flow,足迹页账本卡订阅同一来源,不复制进页面状态。
+     */
+    val monthlyBudget: StateFlow<Long> = budgetPreference.monthlyBudgetMinor
+
+    /** 打开/关闭「设置每月预算」对话框。 */
+    fun openBudgetDialog() = _uiState.update { it.copy(showBudgetDialog = true) }
+
+    fun closeBudgetDialog() = _uiState.update { it.copy(showBudgetDialog = false) }
+
+    /** 提交预算输入(元文本)。空/非正视为清除预算。 */
+    fun setMonthlyBudget(text: String) {
+        budgetPreference.setMonthlyBudgetMinor(parseBudgetYuanToMinor(text))
+        closeBudgetDialog()
+    }
 
     init {
         refreshStats()
@@ -146,6 +174,7 @@ class SettingsViewModel @Inject constructor(
             when (val result = backupStore.export(target)) {
                 is MealResult.Success -> {
                     val summary = result.value
+                    backupStatePreference.markBackedUp()
                     _uiState.update {
                         it.copy(
                             isBusy = false,
@@ -162,8 +191,39 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    // ---------------------------------------------------------------- 导入
+    /**
+     * 导出账本为 CSV（可导入 Excel / Numbers / 表格软件）。
+     *
+     * 目标 URI 由 `CreateDocument("text/csv")` 返回,同样无需存储权限。空数据也允许导出
+     * (只有表头的模板),因此不受 [SettingsUiState.canExport] 的「记录数>0」限制。
+     */
+    fun exportLedgerCsv(target: Uri) {
+        val snapshot = _uiState.updateAndGet { state ->
+            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在导出账本…", message = null, errorMessage = null)
+        }
+        if (!snapshot.isBusy) return
 
+        viewModelScope.launch {
+            when (val result = ledgerCsvStore.export(target)) {
+                is MealResult.Success -> _uiState.update {
+                    it.copy(
+                        isBusy = false,
+                        busyLabel = null,
+                        message = "已导出 ${result.value} 条用餐记录为 CSV",
+                    )
+                }
+
+                is MealResult.Failure -> _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("导出账本失败"))
+                }
+            }
+        }
+    }
+
+    /** 账本 CSV 的默认文件名，供文件选择器预填。 */
+    fun defaultLedgerCsvName(): String = ledgerCsvStore.defaultFileName()
+
+    // ---------------------------------------------------------------- 导入
     /** 用户选好备份文件：不立即导入，先弹确认框，因为导入会覆盖现有数据。 */
     fun requestImport(uri: Uri) =
         _uiState.update { it.copy(pendingImportUri = uri, message = null, errorMessage = null) }
@@ -319,6 +379,26 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(message = "已保存同步配置", errorMessage = null) }
     }
 
+    /** 测试 WebDAV 连通性(不改动数据)。成功给绿色提示,失败给常驻错误。 */
+    fun testWebDav() {
+        val snapshot = _uiState.updateAndGet { state ->
+            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在测试连接…", message = null, errorMessage = null)
+        }
+        if (!snapshot.isBusy) return
+
+        viewModelScope.launch {
+            when (val result = webDavStore.testConnection()) {
+                is MealResult.Success -> _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, message = result.value)
+                }
+
+                is MealResult.Failure -> _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("连接测试失败"))
+                }
+            }
+        }
+    }
+
     /** 上传当前全部数据到 WebDAV（覆盖远端同名文件）。 */
     fun uploadToWebDav() {
         val snapshot = _uiState.updateAndGet { state ->
@@ -330,6 +410,7 @@ class SettingsViewModel @Inject constructor(
             when (val result = webDavStore.upload()) {
                 is MealResult.Success -> {
                     val summary = result.value
+                    backupStatePreference.markBackedUp()
                     _uiState.update {
                         it.copy(
                             isBusy = false,

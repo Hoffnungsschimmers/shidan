@@ -112,7 +112,7 @@ class AppLog @Inject constructor(
     /** 导出日志文本（含设备与版本头），供设置页分享。 */
     suspend fun exportText(): String = withContext(Dispatchers.IO) {
         val header = buildString {
-            appendLine("味笺运行日志")
+            appendLine("食单运行日志")
             appendLine("包名=${context.packageName} 版本=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE})")
             appendLine("系统=Android ${Build.VERSION.RELEASE}(API ${Build.VERSION.SDK_INT}) 机型=${Build.MANUFACTURER} ${Build.MODEL}")
             appendLine("导出时间=${STAMP_FORMAT.format(Date())}")

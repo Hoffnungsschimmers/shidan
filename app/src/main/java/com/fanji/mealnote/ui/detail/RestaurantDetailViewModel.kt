@@ -47,6 +47,9 @@ data class RestaurantDetailUiState(
 
     /** 最近一次用餐时间，无记录时为 null。 */
     val latestVisitAt: Long? get() = visits.firstOrNull()?.record?.eatenAt
+
+    /** 该店累计入账金额（分）；无任何入账为 null（区别于 0）。 */
+    val totalSpentMinor: Long? get() = detail?.records?.totalLedgerMinor()
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

@@ -46,9 +46,9 @@ private val LightColors = lightColorScheme(
     onError = LightOnError,
     errorContainer = LightErrorContainer,
     onErrorContainer = LightOnErrorContainer,
-    inverseSurface = Color(0xFF2A2E33),
-    inverseOnSurface = Color(0xFFF2F3F5),
-    inversePrimary = Color(0xFF4FD39A),
+    inverseSurface = Color(0xFF2E2620),
+    inverseOnSurface = Color(0xFFF4EFE8),
+    inversePrimary = DarkPrimary,
     scrim = Color(0x99000000),
 )
 
@@ -82,37 +82,39 @@ private val DarkColors = darkColorScheme(
     onError = DarkOnError,
     errorContainer = DarkErrorContainer,
     onErrorContainer = DarkOnErrorContainer,
-    inverseSurface = Color(0xFFE9EBEE),
-    inverseOnSurface = Color(0xFF1A1C1F),
-    inversePrimary = Color(0xFF04341F),
+    inverseSurface = Color(0xFFEDE6DC),
+    inverseOnSurface = DarkSurface,
+    inversePrimary = LightOnPrimaryContainer,
     scrim = Color(0xCC000000),
 )
 
 /**
  * 形状阶梯。
  *
- * MIUIx 的圆角明显大于 Material 默认值，且**相邻档位差距更大**，让「大卡片 / 小控件」
- * 在视觉上立刻区分开。对照上一版（6/10/14/18/24）：本次整体上移并拉开间距。
+ * 相邻档位差距刻意拉开，让「大卡片 / 小控件」在视觉上立刻区分开。
+ * 「暖食欲」这一版整体再上调一档（14→16、18→20、24→26、30→32）：
+ * 封面图成为卡片主角后，小圆角会让大图的弧度看起来「没包住」，
+ * 而图片与容器的圆角比需要保持同一语言，否则图为主版式会显得生硬。
  *
  * 使用建议：
- * - 页面级大卡片、底部面板 → [Shapes.extraLarge]（30dp）
- * - 内容卡片、图片 → [Shapes.large]（24dp）
- * - 按钮、输入框、分段控件 → [Shapes.medium]（18dp）
- * - 标签、徽章 → [Shapes.small]（14dp）
+ * - 页面级大卡片、底部面板 → [Shapes.extraLarge]（32dp）
+ * - 内容卡片、封面图 → [Shapes.large]（26dp）
+ * - 按钮、输入框、芯片 → [Shapes.medium]（20dp）
+ * - 徽章、缩略图 → [Shapes.small]（16dp）
  */
 private val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(10.dp),
-    small = RoundedCornerShape(14.dp),
-    medium = RoundedCornerShape(18.dp),
-    large = RoundedCornerShape(24.dp),
-    extraLarge = RoundedCornerShape(30.dp),
+    small = RoundedCornerShape(16.dp),
+    medium = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(26.dp),
+    extraLarge = RoundedCornerShape(32.dp),
 )
 
 /**
  * Material 3 色彩方案之外的补充设计令牌。
  *
- * 这些值无法塞进 [androidx.compose.material3.ColorScheme]（阴影色、玻璃着色没有对应槽位），
- * 但必须随主题一起切换深浅色，因此用 [staticCompositionLocalOf] 下发。
+ * 这些值无法塞进 [androidx.compose.material3.ColorScheme]（阴影色、玻璃着色、装饰色
+ * 没有对应槽位），但必须随主题一起切换深浅色，因此用 [staticCompositionLocalOf] 下发。
  * 用 static 而非普通 CompositionLocal：主题切换是低频事件，静态版本读取时不做快照追踪，
  * 在列表滚动等高频重组路径上开销更低。
  */
@@ -129,6 +131,24 @@ data class MealTokens(
     val glassTintFade: Color,
     /** 玻璃边缘高光描边。 */
     val glassHighlight: Color,
+    /**
+     * 主色鲜亮档：**仅装饰**。渐变顶部、图表柱、聚焦光晕。
+     *
+     * 不承载文字 —— 它配白字达不到 AA，这是 [LightPrimary] 被收深的原因。
+     */
+    val primaryVivid: Color,
+    /** 实心按钮渐变的暗端（比 [LightPrimary] 更深，白字对比度更高）。 */
+    val primaryDeep: Color,
+    /** 琥珀明亮档：仅装饰（比例条、金额柱、hero 点缀）。 */
+    val secondaryVivid: Color,
+    /**
+     * 陶土红：分享卡片 / 年度回顾等脱离应用状态的独立图片版面专用。
+     *
+     * 应用内禁止用于任何状态表达，避免与「不推荐 / 删除」的红混淆。
+     */
+    val accentTerracotta: Color,
+    /** hero 卡的暖光渐变（自上而下两档）。 */
+    val heroGradient: List<Color>,
     /** 是否深色主题。 */
     val isDark: Boolean,
 )
@@ -141,6 +161,11 @@ val LocalMealTokens = staticCompositionLocalOf {
         glassTint = GlassTintLight,
         glassTintFade = GlassTintLightFade,
         glassHighlight = GlassHighlight,
+        primaryVivid = LightPrimaryVivid,
+        primaryDeep = LightPrimaryDeep,
+        secondaryVivid = LightSecondaryVivid,
+        accentTerracotta = AccentTerracottaLight,
+        heroGradient = HeroGradientLight,
         isDark = false,
     )
 }
@@ -154,7 +179,7 @@ val MaterialTheme.mealTokens: MealTokens
  *
  * 相比直接调用 [Modifier.shadow]，这里固定了两点：
  * 1. `clip = false` —— 阴影要画在形状之外，裁剪掉就没有柔和扩散效果了；
- * 2. 阴影色取自主题令牌而非纯黑 —— 纯黑在冷灰底上会发脏。
+ * 2. 阴影色取自主题令牌而非纯黑 —— 纯黑压在暖米白底上会发脏，暖棕阴影才与照片同色温。
  *
  * 调用约定：`Modifier.softShadow(...).background(color, shape)`，
  * 先投影再铺底色，否则底色会把阴影盖住。
@@ -175,19 +200,24 @@ fun Modifier.softShadow(
 /**
  * 应用主题。
  *
- * [darkTheme] 默认跟随系统；本项目暂未提供应用内手动切换（属于 V0.3 范围），
- * 但参数保留，便于后续接入。
+ * [darkTheme] 由调用方决定：设置页提供「跟随系统 / 浅色 / 深色」三档
+ * （见 `ThemePreference` 与 `MainActivity` 的 `resolveDark()`），此处默认回退跟随系统。
  */
 @Composable
 fun MealNoteTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     val tokens = if (darkTheme) {
         MealTokens(
-            shadowAmbient = Color(0x33000000),
-            shadowSpot = Color(0x4D000000),
+            shadowAmbient = Color(0x40000000),
+            shadowSpot = Color(0x66000000),
             primaryShadow = PrimaryShadowDark,
             glassTint = GlassTintDark,
             glassTintFade = GlassTintDarkFade,
             glassHighlight = GlassHighlightDark,
+            primaryVivid = DarkPrimaryVivid,
+            primaryDeep = DarkPrimaryDeep,
+            secondaryVivid = DarkSecondaryVivid,
+            accentTerracotta = AccentTerracottaDark,
+            heroGradient = HeroGradientDark,
             isDark = true,
         )
     } else {
@@ -198,6 +228,11 @@ fun MealNoteTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composab
             glassTint = GlassTintLight,
             glassTintFade = GlassTintLightFade,
             glassHighlight = GlassHighlight,
+            primaryVivid = LightPrimaryVivid,
+            primaryDeep = LightPrimaryDeep,
+            secondaryVivid = LightSecondaryVivid,
+            accentTerracotta = AccentTerracottaLight,
+            heroGradient = HeroGradientLight,
             isDark = false,
         )
     }

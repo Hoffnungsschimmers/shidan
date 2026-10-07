@@ -1,3 +1,5 @@
 <resources>
-    <color name="launcher_background">#3F6650</color>
+    <!-- 桌面图标底色：与应用主色同一档深翠绿（旧值 #3F6650 是上一版的低饱和鼠尾草绿，
+         界面转暖色后它会与白底应用内页脱节）。 -->
+    <color name="launcher_background">#0A8558</color>
 </resources>

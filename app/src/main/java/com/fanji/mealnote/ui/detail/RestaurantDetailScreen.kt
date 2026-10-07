@@ -85,6 +85,7 @@ import com.fanji.mealnote.ui.components.isFluidMotion
 import com.fanji.mealnote.ui.components.rememberGlassBackdrop
 import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import com.fanji.mealnote.ui.formatMealDate
+import com.fanji.mealnote.ui.formatLedgerAmount
 import java.io.File
 
 /** 头图高度。 */
@@ -200,7 +201,11 @@ fun RestaurantDetailScreen(
                             subtitle = if (uiState.visits.isEmpty()) {
                                 "还没有记录过这一家"
                             } else {
-                                "共 ${uiState.visits.size} 次，新的在上面"
+                                buildString {
+                                    append("共 ${uiState.visits.size} 次")
+                                    uiState.totalSpentMinor?.let { append(" · 累计 ¥${it.formatLedgerAmount()}") }
+                                    append("，新的在上面")
+                                }
                             },
                             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 26.dp, bottom = 12.dp),
                         )

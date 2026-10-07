@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.material.icons.rounded.NetworkCheck
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -48,6 +49,7 @@ fun WebDavSection(
     enabled: Boolean,
     onUpload: () -> Unit,
     onDownload: () -> Unit,
+    onTest: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val config by viewModel.webDavConfig.collectAsStateWithLifecycle()
@@ -89,6 +91,13 @@ fun WebDavSection(
                 return@MiuixCard
             }
             if (config.isConfigured && !expanded) {
+                MiuixListRow(
+                    icon = Icons.Rounded.NetworkCheck,
+                    title = "测试连接",
+                    subtitle = "检查地址、账号与是否已有备份，不改动数据",
+                    enabled = enabled,
+                    onClick = onTest,
+                )
                 MiuixListRow(
                     icon = Icons.Rounded.CloudUpload,
                     title = "上传当前数据",

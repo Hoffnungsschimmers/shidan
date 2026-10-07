@@ -1,5 +1,6 @@
 package com.fanji.mealnote.ui.home
 
+import androidx.compose.runtime.Immutable
 import java.time.YearMonth
 import java.time.ZoneId
 
@@ -20,6 +21,7 @@ import java.time.ZoneId
  */
 
 /** 月度金额柱的一根柱子。[amountMinor] 为 `null` = 该月没有任何入账记录。 */
+@Immutable
 data class MonthlyAmount(
     val yearMonth: String,
     val label: String,
@@ -27,6 +29,7 @@ data class MonthlyAmount(
 )
 
 /** 花钱最多的店：按累计入账金额排行。 */
+@Immutable
 data class RestaurantSpend(
     val restaurantId: Long,
     val restaurantName: String,
@@ -36,6 +39,7 @@ data class RestaurantSpend(
 )
 
 /** 入账覆盖情况：有金额几条、写了花费但没入账几条。 */
+@Immutable
 data class LedgerCoverage(
     val recognizedCount: Int,
     val textOnlyCount: Int,
@@ -120,5 +124,46 @@ internal fun List<FootprintEntry>.ledgerCoverageIn(year: Int, zone: ZoneId): Led
         textOnlyCount = inYear.count {
             it.ledgerAmountMinor() == null && it.record.priceText.isNotBlank()
         },
+    )
+}
+
+/**
+ * 指定自然月的入账总额(分);该月没有任何入账记录时返回 `null`(与年度口径一致:null ≠ 0)。
+ *
+ * 从 `FootprintViewModel` 里内联的「本月入账」下沉为纯函数,以便按固定月份单测。
+ */
+internal fun List<FootprintEntry>.ledgerSpendInMonth(month: YearMonth, zone: ZoneId): Long? =
+    filter { it.record.eatenAt.toYearMonth(zone) == month }
+        .mapNotNull { it.ledgerAmountMinor() }
+        .takeIf { it.isNotEmpty() }
+        ?.sum()
+
+/**
+ * 每月预算进度。
+ *
+ * @param spentMinor 本月已入账金额(分),null 视为 0。
+ * @param budgetMinor 每月预算(分)。<=0 表示未设预算,返回 null(界面不显示进度)。
+ *
+ * `fraction` **不做上限裁剪**(超支时 >1,交给界面决定进度条封顶与配色);
+ * `remainingMinor` 可为负(超支额取负);`overBudget` 为是否超过预算。
+ */
+@Immutable
+data class BudgetProgress(
+    val spentMinor: Long,
+    val budgetMinor: Long,
+    val fraction: Float,
+    val remainingMinor: Long,
+    val overBudget: Boolean,
+)
+
+internal fun monthlyBudgetProgress(spentMinor: Long?, budgetMinor: Long): BudgetProgress? {
+    if (budgetMinor <= 0L) return null
+    val spent = (spentMinor ?: 0L).coerceAtLeast(0L)
+    return BudgetProgress(
+        spentMinor = spent,
+        budgetMinor = budgetMinor,
+        fraction = spent.toDouble().div(budgetMinor.toDouble()).toFloat(),
+        remainingMinor = budgetMinor - spent,
+        overBudget = spent > budgetMinor,
     )
 }

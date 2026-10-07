@@ -55,6 +55,7 @@ fun AddRestaurantScreen(
     viewModel: AddRestaurantViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val duplicateName by viewModel.duplicateName.collectAsStateWithLifecycle()
     val photoViewer = rememberPhotoViewerState()
 
     // 用 rememberSaveable 保存相机目标文件路径：拍照会短暂离开本 Activity，
@@ -135,6 +136,25 @@ fun AddRestaurantScreen(
                             minLines = 2,
                             maxLines = 3,
                             leadingIcon = Icons.Rounded.LocationOn,
+                        )
+                    }
+                }
+            }
+
+            // 重复店名提醒(非阻塞):清单里已有同名店时提示,但不拦截保存——同名分店合法。
+            val dup = duplicateName
+            if (dup != null && !uiState.showNameError) {
+                item {
+                    MiuixCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        elevation = 1.dp,
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentPadding = PaddingValues(14.dp),
+                    ) {
+                        Text(
+                            text = "清单里已经有「$dup」了，确认不是同一家再保存。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
                         )
                     }
                 }

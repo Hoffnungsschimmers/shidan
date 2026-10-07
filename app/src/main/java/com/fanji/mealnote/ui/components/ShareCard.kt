@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +53,7 @@ import java.io.File
  */
 
 /** 分享卡片需要的最小数据集。刻意不复用数据库实体，避免把用不到的列带进界面层。 */
+@Immutable
 data class ShareCardData(
     val restaurantName: String,
     val address: String,
@@ -184,7 +186,7 @@ private fun ShareCardContent(data: ShareCardData) {
         )
 
         Text(
-            text = "味笺",
+            text = "食单",
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(16.dp)

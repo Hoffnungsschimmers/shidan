@@ -1,5 +1,6 @@
 package com.fanji.mealnote.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,16 +32,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
 import com.fanji.mealnote.data.local.RestaurantEntity
 import com.fanji.mealnote.data.local.RestaurantStatus
 import com.fanji.mealnote.data.local.Verdict
+import com.fanji.mealnote.ui.coverInitial
 import com.fanji.mealnote.ui.displayName
+import com.fanji.mealnote.ui.theme.mealTokens
 import java.io.File
 
 /**
@@ -53,127 +62,302 @@ import java.io.File
 // ─────────────────────────── 状态与评价徽章 ───────────────────────────
 
 /**
+ * 徽章的公共外壳：圆角胶囊 + 前置色点 + 文字。
+ *
+ * 「色点 + 文字」而不是「整块色底 + 反白字」有两个原因：
+ * 1. 状态不能只靠颜色表达（无障碍硬约定），文字始终在；
+ * 2. 暖底体系里大面积彩色胶囊会很吵，把颜色收成一个 5dp 的点，
+ *    列表里一排卡片立刻安静下来，但扫一眼仍能分辨状态。
+ */
+@Composable
+private fun MealPill(
+    text: String,
+    container: Color,
+    content: Color,
+    dot: Color,
+    modifier: Modifier = Modifier,
+    roomy: Boolean = false,
+) {
+    Surface(modifier = modifier, color = container, contentColor = content, shape = CircleShape) {
+        Row(
+            modifier = Modifier.padding(
+                start = if (roomy) 14.dp else 9.dp,
+                end = if (roomy) 16.dp else 11.dp,
+                top = if (roomy) 7.dp else 4.dp,
+                bottom = if (roomy) 7.dp else 4.dp,
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(if (roomy) 7.dp else 6.dp)
+                    .clip(CircleShape)
+                    .background(dot)
+                    // 色点纯装饰：状态文字已经把信息说完了。
+                    .clearAndSetSemantics { },
+            )
+            Spacer(Modifier.width(if (roomy) 7.dp else 5.dp))
+            Text(
+                text = text,
+                style = if (roomy) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium,
+            )
+        }
+    }
+}
+
+/**
  * 餐厅状态徽章。
  *
- * 颜色语义：**橙 = 还没去**，**绿 = 去过了**。与分段控件、统计胶囊共用同一套语义色，
- * 因此用户在任何页面看到橙色都知道代表「待探访」。
+ * 颜色语义：**琥珀 = 还没去**，**绿 = 去过了**。与分段控件、统计胶囊共用同一套语义色，
+ * 因此用户在任何页面看到琥珀都知道代表「待探访」。
  */
 @Composable
 fun StatusBadge(status: RestaurantStatus, modifier: Modifier = Modifier) {
-    val container = when (status) {
-        RestaurantStatus.WANT_TO_EAT -> MaterialTheme.colorScheme.secondaryContainer
-        RestaurantStatus.EATEN -> MaterialTheme.colorScheme.primaryContainer
-    }
-    val content = when (status) {
-        RestaurantStatus.WANT_TO_EAT -> MaterialTheme.colorScheme.onSecondaryContainer
-        RestaurantStatus.EATEN -> MaterialTheme.colorScheme.onPrimaryContainer
-    }
-    Surface(modifier = modifier, color = container, contentColor = content, shape = CircleShape) {
-        Text(
-            text = status.displayName(),
-            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
-            style = MaterialTheme.typography.labelMedium,
+    val (container, content, dot) = when (status) {
+        RestaurantStatus.WANT_TO_EAT -> Triple(
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            MaterialTheme.colorScheme.secondary,
+        )
+
+        RestaurantStatus.EATEN -> Triple(
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer,
+            MaterialTheme.colorScheme.primary,
         )
     }
+    MealPill(text = status.displayName(), container, content, dot, modifier)
 }
 
 /**
  * 三级评价徽章。
  *
- * 颜色语义：绿 = 推荐，石板灰 = 尚可（中性，因为它既不好也不坏），红 = 不推荐。
+ * 颜色语义：绿 = 推荐，暖石灰 = 尚可（中性，因为它既不好也不坏），红 = 不推荐。
  * 文字始终与颜色同时出现，不依赖颜色单独传达信息（无障碍要求）。
  */
 @Composable
 fun VerdictBadge(verdict: Verdict, modifier: Modifier = Modifier, roomy: Boolean = false) {
-    val container = when (verdict) {
-        Verdict.GOOD -> MaterialTheme.colorScheme.primaryContainer
-        Verdict.MEH -> MaterialTheme.colorScheme.tertiaryContainer
-        Verdict.BAD -> MaterialTheme.colorScheme.errorContainer
-    }
-    val content = when (verdict) {
-        Verdict.GOOD -> MaterialTheme.colorScheme.onPrimaryContainer
-        Verdict.MEH -> MaterialTheme.colorScheme.onTertiaryContainer
-        Verdict.BAD -> MaterialTheme.colorScheme.onErrorContainer
-    }
-    Surface(modifier = modifier, color = container, contentColor = content, shape = CircleShape) {
-        Text(
-            text = verdict.displayName(),
-            modifier = Modifier.padding(
-                horizontal = if (roomy) 16.dp else 11.dp,
-                vertical = if (roomy) 8.dp else 5.dp,
-            ),
-            style = if (roomy) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium,
+    val (container, content, dot) = when (verdict) {
+        Verdict.GOOD -> Triple(
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer,
+            MaterialTheme.colorScheme.primary,
         )
+
+        Verdict.MEH -> Triple(
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.onTertiaryContainer,
+            MaterialTheme.colorScheme.tertiary,
+        )
+
+        Verdict.BAD -> Triple(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+            MaterialTheme.colorScheme.error,
+        )
+    }
+    MealPill(
+        text = verdict.displayName(),
+        container,
+        content,
+        dot,
+        modifier,
+        roomy,
+    )
+}
+
+// ───────────────────────────── 封面图 ─────────────────────────────
+
+/**
+ * 店铺封面。
+ *
+ * 「图为主」的落点：清单里每张卡都以封面为锚，**没有封面时也不能是灰底 + 小图标** ——
+ * 那会让缺图的卡片看起来像加载失败。缺图统一退化为「暖色渐变 + 店名首字」，
+ * 视觉上仍是一张有内容的封面，只是内容是字。
+ *
+ * 图片走 `rememberAsyncImagePainter` + [Image]，解码尺寸由外层固定 Box 决定
+ * （等价于 `AsyncImage` 必须显式指定尺寸的要求：不给边界时 Coil 会按原图分辨率解码，
+ * 一张 2048px 照片约占 16MB，多图列表直接 OOM）。
+ *
+ * @param press 0~1 的按压进度；非空时封面随卡片按下**反向轻微放大**，
+ *   让反馈落在图片上而不是整块纸片上。
+ */
+@Composable
+fun RestaurantCover(
+    photoPath: String,
+    name: String,
+    modifier: Modifier = Modifier,
+    size: Dp = 92.dp,
+    shape: Shape = MaterialTheme.shapes.small,
+    press: Float = 0f,
+    contentDescription: String? = "${name}的封面图片",
+) {
+    RestaurantCoverSurface(
+        photoPath = photoPath,
+        name = name,
+        modifier = modifier.size(size),
+        shape = shape,
+        press = press,
+        contentDescription = contentDescription,
+    )
+}
+
+/**
+ * 封面本体：尺寸完全由传入的 [modifier] 决定。
+ *
+ * 与 [RestaurantCover] 分开是因为清单卡要的是**固定方图**，而随机选店弹窗要的是
+ * 铺满卡片的**横幅**（`fillMaxWidth + aspectRatio`）—— 一套内容，两种外形。
+ *
+ * 同样地，调用方必须给出**有界尺寸**：不给边界时 Coil 会按原图分辨率解码。
+ */
+@Composable
+fun RestaurantCoverSurface(
+    photoPath: String,
+    name: String,
+    modifier: Modifier = Modifier,
+    shape: Shape = MaterialTheme.shapes.small,
+    press: Float = 0f,
+    contentDescription: String? = "${name}的封面图片",
+) {
+    val tokens = MaterialTheme.mealTokens
+    val fluid = isFluidMotion
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (photoPath.isNotBlank()) {
+            val painter = rememberAsyncImagePainter(model = File(photoPath))
+            val loaded = painter.state is AsyncImagePainter.State.Success
+            Image(
+                painter = painter,
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .imageReveal(revealed = loaded, zoom = press, enabled = fluid),
+            )
+        } else {
+            // 缺图：暖光渐变 + 首字。首字按 code point 取，避免 emoji 被切成半个方块。
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(tokens.heroGradient)),
+                contentAlignment = Alignment.Center,
+            ) {
+                val initial = coverInitial(name)
+                if (initial.isNotEmpty()) {
+                    Text(
+                        text = initial,
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                } else {
+                    Icon(
+                        Icons.Rounded.Storefront,
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    )
+                }
+            }
+        }
     }
 }
 
 // ───────────────────────────── 餐厅行 ─────────────────────────────
 
 /**
- * 餐厅信息行：封面 + 店名 + 地址 + 状态徽章。
+ * 餐厅信息行：封面 + 店名 + 地址 + 状态/评价元信息。
  *
- * 刻意**不含卡片外壳**，只负责内容排布 —— 「清单」页与「选店」页用的是不同的卡片容器
+ * 刻意**不含卡片外壳**，只负责内容排布 —— 「清单」「选店」「随机结果」用的是不同容器
  * （一个白底投影、一个主色浅底），把外壳留给调用方才能复用同一套行内布局。
+ *
+ * 信息层次从上一版的「店名 16sp + 地址 12sp + 右侧徽章」调整为
+ * 「店名 `headlineSmall` 22sp + 地址 + 底部元信息行」：封面变大后如果标题仍是 16sp，
+ * 整张卡读不出主次（字和图差不多重）。
+ *
+ * @param visitCount 非空且在已用餐状态下才显示「去过 N 次」，给「常去 / 偶尔去」一个直观区分。
+ * @param latestVerdict 最近一次评价；清单页用它一眼看出「这家上次吃得怎么样」。
  */
 @Composable
 fun RestaurantRow(
     restaurant: RestaurantEntity,
     modifier: Modifier = Modifier,
+    visitCount: Int? = null,
+    latestVerdict: Verdict? = null,
+    press: Float = 0f,
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(60.dp)
-                .clip(MaterialTheme.shapes.small)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RestaurantCover(
+            photoPath = restaurant.recommendationPhotoPath,
+            name = restaurant.name,
+            press = press,
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            if (restaurant.recommendationPhotoPath.isNotBlank()) {
-                AsyncImage(
-                    model = File(restaurant.recommendationPhotoPath),
-                    contentDescription = "${restaurant.name}的封面图片",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                Icon(
-                    Icons.Rounded.Storefront,
-                    contentDescription = null,
-                    modifier = Modifier.size(25.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                )
-            }
-        }
-        Spacer(Modifier.width(13.dp))
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(
                 text = restaurant.name,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.headlineSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (restaurant.address.isNotBlank()) {
-                    Icon(
-                        Icons.Rounded.LocationOn,
-                        contentDescription = null,
-                        modifier = Modifier.size(13.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    )
-                    Spacer(Modifier.width(3.dp))
-                }
+                Icon(
+                    Icons.Rounded.LocationOn,
+                    contentDescription = null,
+                    modifier = Modifier.size(13.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                )
+                Spacer(Modifier.width(4.dp))
                 Text(
                     text = restaurant.address.ifBlank { "未填写地址" },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (restaurant.address.isBlank()) {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            // 元信息行只在真有内容时出现：一排卡片底部齐刷刷挂着一个「待探访」
+            // 和分段筛选本身重复，反而是噪音。
+            val showMeta = latestVerdict != null ||
+                (visitCount != null && visitCount > 0 && restaurant.status == RestaurantStatus.EATEN)
+            if (showMeta) {
+                Spacer(Modifier.height(2.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    latestVerdict?.let { VerdictBadge(it) }
+                    if (visitCount != null && visitCount > 0 && restaurant.status == RestaurantStatus.EATEN) {
+                        Text(
+                            text = "去过 $visitCount 次",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
         Spacer(Modifier.width(10.dp))
-        if (trailing != null) trailing() else StatusBadge(restaurant.status)
+        if (trailing != null) {
+            trailing()
+        } else if (latestVerdict == null) {
+            StatusBadge(restaurant.status)
+        }
     }
 }
 
@@ -342,18 +526,19 @@ fun SelectedPhoto(
  * 空图片占位块，用于详情页等「没有照片但需要保持版面结构」的位置。
  *
  * 抽出来是为了让「无封面」在列表、详情、表单三处的观感一致。
+ * 底色用与封面缺图同一束暖光渐变，避免出现「一种灰表示没图、另一种灰也表示没图」。
  */
 @Composable
 fun PhotoPlaceholder(modifier: Modifier = Modifier, iconSize: Int = 40) {
     Box(
-        modifier = modifier.background(MaterialTheme.colorScheme.primaryContainer),
+        modifier = modifier.background(Brush.verticalGradient(MaterialTheme.mealTokens.heroGradient)),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             Icons.Rounded.Storefront,
             contentDescription = null,
             modifier = Modifier.size(iconSize.dp),
-            tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
         )
     }
 }

@@ -1,7 +1,5 @@
 package com.fanji.mealnote.ui
 
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -16,6 +14,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.fanji.mealnote.ui.add.AddRestaurantScreen
 import com.fanji.mealnote.ui.components.LocalFluidMotion
+import com.fanji.mealnote.ui.components.MealMotion
 import com.fanji.mealnote.ui.detail.RestaurantDetailScreen
 import com.fanji.mealnote.ui.edit.EditRestaurantScreen
 import com.fanji.mealnote.ui.edit.EditVisitScreen
@@ -71,6 +70,9 @@ object Routes {
  * 转场动画统一为「新页面从右侧推入 + 淡入，旧页面向左退场」：
  * 横向位移量刻意小于屏幕宽度（`it / 6`），形成轻微视差而不是整屏平移 ——
  * 整屏平移在快速连续跳转时会让人失去方向感，小位移能保留「谁盖在谁上面」的直觉。
+ *
+ * 四个转场全部走 [MealMotion.settle]：项目约定过渡型动效不用缓动曲线
+ * （`DESIGN_SYSTEM.md` 第七节），此前这里的 `tween(220)` 是唯一一处例外。
  */
 @Composable
 fun MealNoteApp() {
@@ -86,10 +88,7 @@ fun MealNoteApp() {
             {
                 slideInHorizontally(
                     initialOffsetX = { width -> width / 6 },
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow,
-                    ),
+                    animationSpec = MealMotion.settle(),
                 ) + fadeIn(animationSpec = tween(200))
             }
         } else {
@@ -99,7 +98,7 @@ fun MealNoteApp() {
             {
                 slideOutHorizontally(
                     targetOffsetX = { width -> -width / 12 },
-                    animationSpec = tween(220),
+                    animationSpec = MealMotion.settle(),
                 ) + fadeOut(animationSpec = tween(160))
             }
         } else {
@@ -109,7 +108,7 @@ fun MealNoteApp() {
             {
                 slideInHorizontally(
                     initialOffsetX = { width -> -width / 12 },
-                    animationSpec = tween(220),
+                    animationSpec = MealMotion.settle(),
                 ) + fadeIn(animationSpec = tween(200))
             }
         } else {
@@ -119,10 +118,7 @@ fun MealNoteApp() {
             {
                 slideOutHorizontally(
                     targetOffsetX = { width -> width / 6 },
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow,
-                    ),
+                    animationSpec = MealMotion.settle(),
                 ) + fadeOut(animationSpec = tween(160))
             }
         } else {

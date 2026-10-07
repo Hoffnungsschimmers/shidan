@@ -14,6 +14,33 @@ import java.util.Locale
  * （术语约定见 `DESIGN_SYSTEM.md`）。
  */
 
+/**
+ * 无封面时用于占位卡片的「首字」。
+ *
+ * 按 **code point** 取：直接 `first()` 会把 emoji 代理对的后半截出来，显示成一个方块
+ * —— 店名里带 emoji 并不罕见（「🍜 老张面馆」），而这里正好是「没有封面图」的那张卡，
+ * 首字就是它唯一的视觉内容，不能是豆腐块。
+ */
+fun coverInitial(name: String): String {
+    val trimmed = name.trim()
+    val first = trimmed.firstOrNull() ?: return ""
+    return if (Character.isHighSurrogate(first)) trimmed.take(2) else first.toString()
+}
+
+/**
+ * 清单页 hero 的问候语。
+ *
+ * [hour] 作参数而非在函数内读时钟：与项目里其它纯逻辑一致，
+ * 也把「23 点算晚上还是凌晨」这类边界锁进测试。
+ */
+fun greetingFor(hour: Int): String = when (hour) {
+    in 5..10 -> "早上好"
+    in 11..13 -> "中午好"
+    in 14..17 -> "下午好"
+    in 18..22 -> "晚上好"
+    else -> "夜深了"
+}
+
 /** 浅色区域使用，格式形如 `2026年9月12日`。 */
 private val dateFormatter = DateTimeFormatter.ofPattern("yyyy年M月d日")
 

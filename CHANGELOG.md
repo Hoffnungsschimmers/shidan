@@ -2,6 +2,112 @@
 
 本项目遵循语义化版本思路记录主要变更。
 
+## 0.6.0（2026-10-06 · 未交付到 `apk/` · 未经设备验证）
+
+ROADMAP 原本把这些内容拆在 v0.5.2、v0.6.0、v0.6.x 三个版本里，实际开发是同一批未提交工作，
+`SettingsScreen.kt` 等文件同时承载多个功能，按版本拆提交拆不干净，因此合为一条记录。
+**无数据库 schema 变更**（沿用 v4）；`versionCode 16` / `versionName 0.6.0`。
+
+### 改名：应用名「味笺」→「食单」
+
+- 桌面名、关于页、分享卡与年度回顾的水印、日志导出标题与邮件主题统一改为**食单**；
+- **`applicationId` 与包名 `com.fanji.mealnote`、数据库文件名 `meal_note.db`、
+  SharedPreferences 文件名（`mealnote_settings` / `mealnote_webdav`）全部不变**：
+  它们决定已安装应用能否覆盖更新、老数据是否成为孤儿，与产品名解耦；
+- 目录名与远端仓库名可以另议，改名不影响构建产物身份。
+
+### 新增：账本 CSV 导出
+
+备份 ZIP 是「换机恢复」的完整快照，CSV 是给人看的账目视图——只含用餐记录里可读的列，
+可直接进 Excel / Numbers / 专业记账软件对账。
+
+- 「我的 → 导出账本 CSV」，经 SAF `CreateDocument("text/csv")` 创建文档（**无存储权限**），
+  默认名 `mealnote-ledger-yyyyMMdd-HHmm.csv`；空数据也允许导出（表头即口径说明）；
+- 列：日期 / 店名 / 地址 / 评价 / 餐品 / 花费(原文) / 入账金额(元) / 就餐人数 / 备注；
+- 转义按 RFC 4180：文本列**一律加引号**（不等出现逗号才补救），内部双引号翻倍，
+  备注里的换行不再把整张表冲散；文件头写 **UTF-8 BOM**（Excel 不认无 BOM 的 UTF-8，中文会变乱码）；
+  整串按 UTF-8 写出、本层不做按字符截断，emoji 代理对保真（对应 v0.3.8 的教训）；
+- 「入账金额」列取结构化的 `amountMinorUnits`，「花费(原文)」列保留自由文本，两列并存不互相冒充。
+- `CsvExportSafetyTest` 13 例锁死转义、BOM 与代理对。
+
+### 新增：每月吃饭预算
+
+- `BudgetPreference`（`SharedPreferences` + `StateFlow`，与 Theme/Motion/Random 同一模式，零新依赖）；
+- 金额存**整数分**（与 `amountMinorUnits` 同口径，浮点不进设置）；`0` 表示未设置（不画进度条）；
+  上限 ¥1,000,000 防误输入天文数字撑坏进度显示；解析吃 `¥`、半/全角千分位逗号，四舍五入到分；
+- 足迹·账本卡顶部进度条 + 剩余/超支文案；`fraction` **不裁剪上限**（超支时 >1，由界面决定封顶与配色），
+  `remainingMinor` 可为负；`BudgetProgressTest` 5 例；
+- **刻意不做系统通知**（通知需要 `POST_NOTIFICATIONS` 运行时权限，与产品边界冲突）；超支不拦截记录。
+
+### 新增：WebDAV 连通性检查
+
+ROADMAP 点名要解决的是「首次用 WebDAV 直接撞 404、毫无线索」——用户只能靠试上传/试下载来排错。
+
+- 设置页「测试连接」对远端文件发 HEAD，不改任何数据；把结果归为六态
+  （`WebDavProbe`：已有备份 / 尚无备份 / 目录不存在 / 认证失败 / 需跳转 / 连不上）；
+- **单个 404 分不清「还没上传过」和「目录不存在」**，而这两种情况用户要做的事正好相反，
+  因此文件侧 404 时再对目录发一次 HEAD（`classifyWebDavProbe` 是纯映射，9 例钉死）；
+- 与 ROADMAP 的口径偏差：计划写「PROPFIND/HEAD 四态」，实现是「两次 HEAD + 六态」，全仓库不使用 PROPFIND；
+- 回显地址与文件名前一律 `redactUrlCredentials` 洗掉凭据；日志只留 `displayHost()`；
+- 详情页与设置页的失败横幅统一为错误色容器 + 显式「知道了」，**不再自动消失**（成功提示仍可自动消失）。
+
+### 新增：清单排序 / 备份新鲜度 / 重复店名提醒 / 年度回顾 / 单店累计入账
+
+- 清单排序三档：最近更新（默认，与旧行为一致）/ 最近添加 / 按名称。`RestaurantSort`
+  常量名即持久化编码（禁止改名），同分按 id 稳定兜底；`ListSortPreference` 同上偏好模式；
+- 备份新鲜度：ZIP 导出与 WebDAV 上传成功都 `markBackedUp`，设置页副标题显示
+  「从未备份 / 今天 / 昨天 / N 天前」，时钟回拨与非法值兜底为「从未」（纯函数 + 5 例）；
+- 新建店铺时对归一化后同名的店给**非阻断**提示：同名分店（「沙县小吃」）真实存在，
+  用户仍可执意保存；归一化只做 trim + 连续空白压一个空格 + 转小写，不做激进处理以免误判；
+- 年度回顾卡片按年份倒序，比历年汇总多算最常去的店与评价分布，复用 ShareCard 框架并可分享；
+  最常去按次数倒序、同次数按 `restaurantId` 升序（与其它排行同一稳定口径）；
+- 详情页副标题显示该店**累计入账**（`DetailStats.totalLedgerMinor()`：`null` ≠ 0，「没记」不等于「没花」）。
+
+### 改动：「暖食欲 · 图为主」视觉全域铺开
+
+- 主色 `#0EA56B`→`#0A8558`：旧值上放白字只有 3.18:1，实心按钮与徽章是靠字号侥幸过关，
+  新值白字 4.66:1（WCAG AA）；`#12B377` 降级为装饰档（图表柱、渐变高光、聚焦光晕）；
+- 底色 `#F3F4F6` 冷灰 → 暖米白 `#F6F1EA`，阴影冷蓝灰 `#202A3A` → 暖棕 `#241A10`
+  （照片是暖调食物，冷底冷阴影让界面与图片像两层皮、卡片发脏）；待探访暖橙 → 琥珀褐 `#9E570F`；
+- 新增 `*Vivid` 与陶土红为**纯装饰**档，禁止进入任何状态语义（红 = 不推荐/危险不容第二个红）；
+- 桌面图标底色与前景同步转色（旧 `#3F6650` 是上一版的低饱和绿）；
+- 清单 / 足迹 / 详情 / 表单 / 设置全域按新令牌改造；`Type.kt` 补 `headlineSmall` 与 `titleSmall`
+  （此前 ShareCard 与业务组件引用 `headlineSmall` 但主题里没有该档，店名**静默回落 Roboto**）；
+- 导航转场的散装 `spring(...)` 改取 `MealMotion` 令牌。
+
+### 安全加固
+
+- `mealnote_webdav`（存有 WebDAV 账号密码的 SharedPreferences）从**系统备份、云备份与设备迁移**
+  三处全部排除：凭据不得离开设备。此前只有照片目录与数据库被排除，是一道 P0 偏差。
+
+### 其他
+
+- 删除 `PendingPhotoCleanupConcurrencyTest`：它在测试里自建 `ConcurrentHashMap` 副本、
+  断言的是 JDK 自身语义，KDoc 自己写明无法实例化 `MealRepository`，即从未触达生产代码。
+  这类「测试自己的副本」的绿比没测试更危险。
+- README 的 JDK 直跑测试类清单补齐：HEAD 只列了 13 个类（当时磁盘已有 14 个），现在 28 个类全部在册；
+  用例数 181 → **252**。新增 `scripts/run-unit-tests.ps1`
+  **从源码自动发现测试类**，从机制上消灭「新增测试类必须手工同步清单」这条已失守三次的约定。
+
+### 验证
+
+2026-10-07 改名与升版后复跑（英文联接入口 + 显式 JDK 17）：
+
+```
+单元测试 ：28 套件 / 252 例全部通过，0 失败 0 错误
+          （scripts/run-unit-tests.ps1 与 gradlew testDebugUnitTest --rerun 双跑一致）
+Lint     ：lintDebug 通过，报告 No issues found
+构建     ：assembleDebug / assembleRelease 均 SUCCESS
+签名     ：apksigner verify 退出码 0（签名者 CN=MealNote）
+包体     ：aapt2 dump badging → package com.fanji.mealnote / versionCode 16 / 0.6.0 / label 食单
+数据库   ：version 4（本版未改动 schema）
+交付     ：产物只在 app/build/outputs/，未复制进 apk/
+```
+
+**仍未解锁的门槛**：本机无真机/模拟器，全部 UI 与动效改动未经设备确认；
+WebDAV 连通性检查**没有在真实服务器上跑通过一次**（AGENTS §5-3），
+CSV 导出与预算的实际界面流程也没被人用过一次。编译与 JVM 测试证明不了这些。
+
 ## 0.5.1
 
 本版重定义「随机选一家」的候选池：抽店不再局限于「当前筛选出来的待探访列表」，
@@ -198,8 +304,11 @@
 - 界面组件拆分重构：从表单与列表页抽出 `CommonStates` / `FormSections` /
   `VerdictSelector` 三个共享组件文件，净减约 700 行重复代码，页面行为不变。
 - 删除无调用者的 `trackPendingPhotos` / `releasePendingPhotos` /
-  `pendingCleanupCount` 与 `EditRestaurantUiState.status`；暂存区并发语义
-  由独立协议测试（`PendingPhotoCleanupConcurrencyTest`）继续覆盖。
+  `pendingCleanupCount` 与 `EditRestaurantUiState.status`。当时为此补的
+  `PendingPhotoCleanupConcurrencyTest` **并未触达生产代码**——它在测试内自建
+  `ConcurrentHashMap` 副本、断言的是 JDK 自身语义，已在后续优化轮删除；
+  真正的删除守卫 `MealRepository.deleteUnreferencedFiles()` 需 DAO + Context，
+  本机 JVM 无法覆盖（表单图片回收由 `ReclaimableFormPhotosTest` 覆盖）。
 - 底部导航栏改用 `selectableGroup()` + `selectable(selected)` 配对写法，
   屏幕阅读器可播报三个标签的选中态（与分段控件同一约定）。
 

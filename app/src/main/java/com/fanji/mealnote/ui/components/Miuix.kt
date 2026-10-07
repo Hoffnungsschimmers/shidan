@@ -1,14 +1,16 @@
 package com.fanji.mealnote.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -31,6 +33,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,9 +46,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -53,11 +59,11 @@ import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
@@ -66,13 +72,15 @@ import com.fanji.mealnote.ui.theme.mealTokens
 import com.fanji.mealnote.ui.theme.softShadow
 
 /**
- * MIUIx 风格基础组件集。
+ * 「暖食欲」基础组件集。
  *
  * 设计约定（与 `DESIGN_SYSTEM.md` 一致）：
- * - **大圆角**：卡片 24dp、按钮/输入框 18dp；
- * - **无边框分层**：卡片靠柔和投影浮起，不使用描边；只有「按下/选中」才出现细边；
- * - **按压有反馈**：所有可点区域都会轻微缩放（见 [pressScale]）；
- * - **颜色分工固定**：主色=主操作，橙=待探访，石板灰=尚可，红=危险。
+ * - **大圆角**：卡片 26dp、按钮/输入框/芯片 20dp；
+ * - **无边框分层**：卡片靠柔和的**暖棕**投影浮起，不使用描边；只有聚焦/选中才出现边；
+ * - **按下有反馈**：可点区域同时给出「缩放 + 投影收缩 + 触觉」三层反馈。
+ *   投影按下时收到 0.35x —— 卡片看起来被**按进页面里**，这是纸面感的关键，
+ *   单纯缩放只会让整块像素抖一下；
+ * - **颜色分工固定**：绿=主操作/已用餐/推荐，琥珀=待探访/花费，暖石灰=尚可，红=危险。
  */
 
 // ─────────────────────────────── 卡片 ───────────────────────────────
@@ -81,9 +89,11 @@ import com.fanji.mealnote.ui.theme.softShadow
  * 内容卡片。
  *
  * [onClick] 为 `null` 时是纯展示容器（不响应点击、不显示水波纹）。
- * 传入后会自动获得按压缩放与水波纹。
+ * 传入后会自动获得按压缩放、投影收缩与水波纹。
  *
- * @param elevation 投影高度。列表卡片建议 2~4dp：再高会让密集列表显得嘈杂。
+ * @param elevation 投影高度。列表卡片建议 2~3dp：再高会让密集列表显得嘈杂。
+ * @param interactionSource 需要让卡片**内部内容**（如封面图）跟着按压状态做动效时传入，
+ *   调用方用同一个 source 调 [rememberPressProgress]。默认自建。
  */
 @Composable
 fun MiuixCard(
@@ -93,14 +103,23 @@ fun MiuixCard(
     color: Color = MaterialTheme.colorScheme.surface,
     elevation: Dp = 3.dp,
     contentPadding: PaddingValues = PaddingValues(18.dp),
+    interactionSource: MutableInteractionSource? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val tokens = MaterialTheme.mealTokens
-    val interaction = remember { MutableInteractionSource() }
+    val interaction = interactionSource ?: remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val haptic = rememberSelectionHaptic()
+    // 按下时投影收缩：卡片「落回」页面，而不是浮着抖。
+    val shadow by animateDpAsState(
+        targetValue = if (onClick != null && pressed) elevation * PRESSED_ELEVATION_FACTOR else elevation,
+        animationSpec = MealMotion.settle(),
+        label = "cardShadow",
+    )
     Column(
         modifier = modifier
             .then(if (onClick != null) Modifier.pressScale(interaction) else Modifier)
-            .softShadow(shape, elevation, tokens.shadowAmbient, tokens.shadowSpot)
+            .softShadow(shape, shadow, tokens.shadowAmbient, tokens.shadowSpot)
             .clip(shape)
             .background(color)
             .then(
@@ -109,7 +128,10 @@ fun MiuixCard(
                         interactionSource = interaction,
                         indication = LocalIndication.current,
                         role = Role.Button,
-                        onClick = onClick,
+                        onClick = {
+                            haptic()
+                            onClick()
+                        },
                     )
                 } else {
                     Modifier
@@ -120,11 +142,13 @@ fun MiuixCard(
     )
 }
 
+private const val PRESSED_ELEVATION_FACTOR = 0.35f
+
 // ─────────────────────────────── 按钮 ───────────────────────────────
 
 /** 按钮的视觉层级。[Filled] 用于页面唯一主操作，其余用于次级操作。 */
 enum class MiuixButtonStyle {
-    /** 实心主色 + 同色系投影，视觉重量最大。 */
+    /** 主色渐变 + 同色系投影，视觉重量最大。 */
     Filled,
 
     /** 主色浅底 + 主色文字，用于并列的次级操作。 */
@@ -142,6 +166,9 @@ enum class MiuixButtonStyle {
  *
  * [loading] 为 true 时按钮**保持原有宽度**只替换内容为转圈，
  * 避免文案切换导致的布局跳动（这在「保存」这类操作上非常显眼）。
+ *
+ * 实心档用 `primary → primaryDeep` 的自上而下渐变：底部更深让白色标签的对比度
+ * 从 4.66:1 抬到 7.14:1 以上，同时避免整块纯色在暖底上显得「平」。
  */
 @Composable
 fun MiuixButton(
@@ -157,6 +184,8 @@ fun MiuixButton(
     val tokens = MaterialTheme.mealTokens
     val shape = MaterialTheme.shapes.medium
     val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val haptic = rememberSelectionHaptic()
     val active = enabled && !loading
 
     val container = when (style) {
@@ -173,18 +202,30 @@ fun MiuixButton(
         MiuixButtonStyle.Text -> MaterialTheme.colorScheme.primary
     }
 
+    val isHero = style == MiuixButtonStyle.Filled && active
+    // 只有实心主按钮投同色系光晕：其它样式加投影会与卡片阴影混淆层次。
+    val shadow by animateDpAsState(
+        targetValue = if (isHero) (if (pressed) 5.dp else 12.dp) else 0.dp,
+        animationSpec = MealMotion.settle(),
+        label = "buttonShadow",
+    )
+    val sheen by animateFloatAsState(
+        targetValue = if (pressed && active) 0.14f else 0f,
+        animationSpec = MealMotion.quick(),
+        label = "buttonSheen",
+    )
+
     Box(
         modifier = modifier
             // heightIn 而非 height：大字体下按钮要能长高，否则文字会被裁掉。
             // 主按钮的 54dp 是**最小**高度而非固定高度。
             .heightIn(min = height)
-            .pressScale(interaction, enabled = active)
+            .pressScale(interaction, pressedScale = 0.975f, enabled = active)
             .then(
-                // 只有实心主按钮投同色系光晕：其它样式加投影会与卡片阴影混淆层次。
-                if (style == MiuixButtonStyle.Filled && active) {
+                if (isHero) {
                     Modifier.softShadow(
                         shape = shape,
-                        elevation = 12.dp,
+                        elevation = shadow,
                         ambient = tokens.primaryShadow.copy(alpha = 0.28f),
                         spot = tokens.primaryShadow,
                     )
@@ -193,7 +234,24 @@ fun MiuixButton(
                 }
             )
             .clip(shape)
-            .background(container)
+            .background(container, shape)
+            .then(
+                // 实心档在纯色之上再铺一层自上而下的主色渐变：底部更深，
+                // 白色标签的对比度从 4.66:1 抬到 7.14:1，同时避免纯色在暖底上显得平。
+                if (isHero) {
+                    Modifier.background(
+                        Brush.verticalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary,
+                                tokens.primaryDeep,
+                            ),
+                        ),
+                        shape,
+                    )
+                } else {
+                    Modifier
+                },
+            )
             .then(
                 if (style == MiuixButtonStyle.Outlined) {
                     Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
@@ -206,7 +264,10 @@ fun MiuixButton(
                 indication = LocalIndication.current,
                 enabled = active,
                 role = Role.Button,
-                onClick = onClick,
+                onClick = {
+                    haptic()
+                    onClick()
+                },
             )
             // 语义整体重写，原因是 loading 时标签会被换成转圈 ——
             // 默认语义会变成一片空白，屏幕阅读器既读不出按钮名，也不知道正在处理。
@@ -228,6 +289,14 @@ fun MiuixButton(
             .padding(horizontal = 22.dp),
         contentAlignment = Alignment.Center,
     ) {
+        // 按下的提亮层放在内容之前：它只做「被压亮」的质感，不参与布局。
+        if (sheen > 0.001f) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.White.copy(alpha = sheen)),
+            )
+        }
         if (loading) {
             CircularProgressIndicator(
                 modifier = Modifier.size(20.dp),
@@ -255,15 +324,120 @@ fun MiuixButton(
     }
 }
 
+// ──────────────────────────── 芯片（轻量入口） ────────────────────────────
+
+/**
+ * 轻量芯片：图标 + 短标签的胶囊控件。
+ *
+ * 用于「排序」「随机抽一家」这类**不该占满一行**的次级入口。之前它们是孤零零的
+ * 纯文字或一整条 48dp 实心按钮 —— 前者像没做完的遗留控件，后者视觉重量压过列表本身。
+ * 芯片把两者校准到「看得见但不抢注意力」这一档。
+ *
+ * @param accent 选中/强调色；默认用主色，「待探访」等语义场景传入对应语义色。
+ */
+@Composable
+fun MiuixChip(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    trailingIcon: ImageVector? = null,
+    selected: Boolean = false,
+    accent: Color = MaterialTheme.colorScheme.primary,
+    height: Dp = 40.dp,
+) {
+    val shape = MaterialTheme.shapes.medium
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val haptic = rememberSelectionHaptic()
+    val container by animateColorAsState(
+        targetValue = if (selected) accent.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant,
+        animationSpec = MealMotion.quick(),
+        label = "chipContainer",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = MealMotion.quick(),
+        label = "chipContent",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (selected) accent.copy(alpha = 0.45f) else Color.Transparent,
+        animationSpec = MealMotion.quick(),
+        label = "chipBorder",
+    )
+
+    Row(
+        modifier = modifier
+            .heightIn(min = height)
+            .pressScale(interaction, pressedScale = 0.94f)
+            .clip(shape)
+            .background(container)
+            .border(1.dp, borderColor, shape)
+            .clickable(
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                role = Role.Button,
+                onClick = {
+                    haptic()
+                    onClick()
+                },
+            )
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        // 按下时图标轻微收紧：芯片尺寸固定，缩放只能落在内容上。
+        val iconScale by animateFloatAsState(
+            targetValue = if (pressed) 0.86f else 1f,
+            animationSpec = MealMotion.bouncy(),
+            label = "chipIcon",
+        )
+        if (icon != null) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier
+                    .size(17.dp)
+                    .graphicScale(iconScale),
+            )
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall,
+            color = contentColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (trailingIcon != null) {
+            Icon(
+                trailingIcon,
+                contentDescription = null,
+                tint = contentColor.copy(alpha = 0.6f),
+                modifier = Modifier.size(15.dp),
+            )
+        }
+    }
+}
+
+/** 只缩放绘制、不改变布局尺寸的缩放（避免图标缩放把同行文字挤得抖一下）。 */
+private fun Modifier.graphicScale(scale: Float): Modifier = this.graphicsLayer {
+    scaleX = scale
+    scaleY = scale
+}
+
 // ──────────────────────────── 分段控件 ────────────────────────────
 
 /**
- * 分段控件（MIUIx 的 Segmented Control）。
+ * 分段控件。
  *
  * 与「标签页」的区别：分段控件用于**切换同一内容的呈现维度**，选项数量固定且都可见，
- * 因此选中态用一块会滑动的白色指示块表达，而不是下划线。
+ * 因此选中态用一块会滑动的浮起指示块表达，而不是下划线。
  *
- * 指示块的位移动画使用弹簧，快速连点时能自然衔接而不会闪回起点。
+ * [accent] 让选中项的指示块与文字**继承该选项自身的语义色**：
+ * 「待探访」选中是琥珀、「已用餐」选中是绿 —— 用户切到哪个筛选，控件自己就在告诉他
+ * 这一屏是什么状态，比只看文字快一拍。不传则回退到中性黑字（足迹页的「时间线 / 统计」
+ * 这类无语义维度的切换就不该染色）。
  *
  * ## 无障碍
  *
@@ -279,12 +453,14 @@ fun <T> MiuixSegmented(
     label: (T) -> String,
     modifier: Modifier = Modifier,
     badge: (T) -> String? = { null },
+    accent: (T) -> Color? = { null },
 ) {
     if (options.isEmpty()) return
     val selectedIndex = options.indexOf(selected).coerceAtLeast(0)
     val shape = MaterialTheme.shapes.medium
     val indicatorShape = MaterialTheme.shapes.small
     val tokens = MaterialTheme.mealTokens
+    val haptic = rememberSelectionHaptic()
 
     // 高度跟随字体缩放：固定 46dp 在系统字体放到最大档时会把文字裁掉。
     // 用「文字行高 + 内边距」反推，正常字号下算出来仍小于 46dp，
@@ -309,12 +485,10 @@ fun <T> MiuixSegmented(
         val itemWidth = maxWidth / options.size
         val indicatorOffset by animateDpAsState(
             targetValue = itemWidth * selectedIndex,
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessMediumLow,
-            ),
+            animationSpec = MealMotion.settle(),
             label = "segmentIndicator",
         )
+        val selectedAccent = options.getOrNull(selectedIndex)?.let(accent)
 
         Box(
             modifier = Modifier
@@ -324,9 +498,26 @@ fun <T> MiuixSegmented(
                 .width(itemWidth)
                 .height(segmentHeight)
                 .padding(SEGMENT_INSET)
-                .softShadow(indicatorShape, 2.dp, tokens.shadowAmbient, tokens.shadowSpot)
+                .softShadow(indicatorShape, 3.dp, tokens.shadowAmbient, tokens.shadowSpot)
                 .clip(indicatorShape)
-                .background(MaterialTheme.colorScheme.surface)
+                // 有语义色时在纯白指示块上叠一层自上而下的同色渐变：
+                // 不直接用半透明色填底，否则底槽的颜色会透上来，选中块看起来像「没填满」。
+                .background(MaterialTheme.colorScheme.surface, indicatorShape)
+                .then(
+                    if (selectedAccent != null) {
+                        Modifier.background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    selectedAccent.copy(alpha = 0.18f),
+                                ),
+                            ),
+                            indicatorShape,
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
                 // 指示块是纯装饰：选中状态已经由选项自身的 selectable 语义表达，
                 // 不排除的话屏幕阅读器会多读一遍无意义的空元素。
                 .clearAndSetSemantics { },
@@ -335,14 +526,15 @@ fun <T> MiuixSegmented(
         Row(Modifier.fillMaxWidth().height(segmentHeight)) {
             options.forEach { option ->
                 val active = option == selected
+                val optionAccent = accent(option)
                 // 文字颜色也做过渡，否则指示块滑到位了文字还是瞬间跳变。
                 val textColor by animateColorAsState(
-                    targetValue = if (active) {
-                        MaterialTheme.colorScheme.onSurface
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                    targetValue = when {
+                        active && optionAccent != null -> optionAccent
+                        active -> MaterialTheme.colorScheme.onSurface
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                    animationSpec = MealMotion.quick(),
                     label = "segmentText",
                 )
                 Box(
@@ -354,7 +546,12 @@ fun <T> MiuixSegmented(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             role = Role.Tab,
-                            onClick = { if (!active) onSelect(option) },
+                            onClick = {
+                                if (!active) {
+                                    haptic()
+                                    onSelect(option)
+                                }
+                            },
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -362,19 +559,27 @@ fun <T> MiuixSegmented(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
                     ) {
+                        // 选中的标签字重加一档：只靠颜色区分在大字体下不够稳。
                         Text(
                             text = label(option),
                             style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold,
                             color = textColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         badge(option)?.let { count ->
                             Spacer(Modifier.width(5.dp))
+                            val badgeScale by animateFloatAsState(
+                                targetValue = if (active) 1f else 0.88f,
+                                animationSpec = MealMotion.bouncy(),
+                                label = "segmentBadge",
+                            )
                             Text(
                                 text = count,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = textColor.copy(alpha = 0.75f),
+                                color = textColor.copy(alpha = 0.8f),
+                                modifier = Modifier.graphicScale(badgeScale),
                             )
                         }
                     }
@@ -385,17 +590,19 @@ fun <T> MiuixSegmented(
 }
 
 private val SEGMENT_HEIGHT = 46.dp
-private val SEGMENT_INSET = 4.dp
+private val SEGMENT_INSET = 5.dp
 
 // ─────────────────────────────── 输入框 ───────────────────────────────
 
 /**
  * 填充式输入框。
  *
- * 与上一版的 `OutlinedTextField` 相比有两点不同：
- * 1. 标签**固定在上方**而非浮动到边框上 —— 浮动标签在长表单里会让每个字段的高度
- *    随聚焦状态变化，视觉上很吵；固定标签的纵向节奏始终一致。
- * 2. 使用填充底色而非描边，聚焦时以主色细边 + 更亮的底色表达。
+ * 标签**固定在上方**而非浮动到边框上 —— 浮动标签在长表单里会让每个字段的高度随聚焦
+ * 状态变化，视觉上很吵。
+ *
+ * 外框由本组件自己画（`background` + 动画 `border`），把 TextField 的容器色全部置透明：
+ * 这样才能让「聚焦」表现为**描边从 outline 淡到主色并加粗**的连续过渡，
+ * 而不是 Material 默认那种瞬间切换的下划线。
  */
 @Composable
 fun MiuixTextField(
@@ -414,54 +621,99 @@ fun MiuixTextField(
     visualTransformation: VisualTransformation = VisualTransformation.None,
     shape: Shape = MaterialTheme.shapes.medium,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val tokens = MaterialTheme.mealTokens
+
+    val container by animateColorAsState(
+        targetValue = when {
+            isError -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+            focused -> MaterialTheme.colorScheme.surface
+            else -> MaterialTheme.colorScheme.surfaceVariant
+        },
+        animationSpec = MealMotion.quick(),
+        label = "fieldContainer",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            isError -> MaterialTheme.colorScheme.error
+            focused -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.outlineVariant
+        },
+        animationSpec = MealMotion.quick(),
+        label = "fieldBorder",
+    )
+    val borderWidth by animateDpAsState(
+        targetValue = if (focused || isError) 1.6.dp else 1.dp,
+        animationSpec = MealMotion.quick(),
+        label = "fieldBorderWidth",
+    )
+    // 聚焦时给一层极淡的主色光晕：暖底上的「我在填这一格」不该只靠一条边。
+    val glow by animateDpAsState(
+        targetValue = if (focused && !isError) 6.dp else 0.dp,
+        animationSpec = MealMotion.settle(),
+        label = "fieldGlow",
+    )
+
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.titleSmall,
             color = if (isError) {
                 MaterialTheme.colorScheme.error
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
-            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+            modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
         )
-        TextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = true,
-            singleLine = singleLine,
-            minLines = minLines,
-            maxLines = maxLines,
-            isError = isError,
-            shape = shape,
-            textStyle = MaterialTheme.typography.bodyLarge,
-            placeholder = placeholder?.let {
-                { Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) }
-            },
-            leadingIcon = leadingIcon?.let { icon ->
-                { Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp)) }
-            },
-            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-            visualTransformation = visualTransformation,
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                errorContainerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
-                // 填充式外观：隐藏所有下划线。
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                disabledIndicatorColor = Color.Transparent,
-                errorIndicatorColor = Color.Transparent,
-                cursorColor = MaterialTheme.colorScheme.primary,
-                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                selectionColors = TextSelectionColors(
-                    handleColor = MaterialTheme.colorScheme.primary,
-                    backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .softShadow(shape, glow, tokens.primaryShadow.copy(alpha = 0.18f), tokens.primaryShadow.copy(alpha = 0.3f))
+                .clip(shape)
+                .background(container)
+                .border(borderWidth, borderColor, shape),
+        ) {
+            TextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = true,
+                singleLine = singleLine,
+                minLines = minLines,
+                maxLines = maxLines,
+                isError = isError,
+                interactionSource = interaction,
+                shape = shape,
+                textStyle = MaterialTheme.typography.bodyLarge,
+                placeholder = placeholder?.let {
+                    { Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) }
+                },
+                leadingIcon = leadingIcon?.let { icon ->
+                    { Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp)) }
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+                visualTransformation = visualTransformation,
+                colors = TextFieldDefaults.colors(
+                    // 容器与描边由外层负责，这里全部透明。
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent,
+                    errorContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                    errorIndicatorColor = Color.Transparent,
+                    cursorColor = MaterialTheme.colorScheme.primary,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    selectionColors = TextSelectionColors(
+                        handleColor = MaterialTheme.colorScheme.primary,
+                        backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                    ),
                 ),
-            ),
-        )
+            )
+        }
         if (supportingText != null) {
             Text(
                 text = supportingText,
@@ -471,7 +723,7 @@ fun MiuixTextField(
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-                modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+                modifier = Modifier.padding(start = 6.dp, top = 6.dp),
             )
         }
     }
@@ -535,6 +787,8 @@ fun MiuixTopBar(
  *
  * 默认 48dp，符合无障碍最小点击尺寸要求。**不建议调小**：图标按钮通常没有文字标签，
  * 触控面积是用户唯一能依赖的线索。
+ *
+ * @param container 底色，默认透明；传 [MaterialTheme] 的容器色即得到「圆角方块图标按钮」。
  */
 @Composable
 fun MiuixIconButton(
@@ -573,18 +827,33 @@ fun MiuixIconButton(
  *
  * 标题用 `titleLarge` 而非 `headlineMedium`：页面级大标题已经占了视觉重音，
  * 区块标题再放大两级会让页面失去层次。层级靠**字重 + 颜色**而非字号拉开。
+ *
+ * [accent] 非空时在标题左侧画一道短竖条：暖底上纯文字的区块分组容易被读成「又一堆字」，
+ * 竖条给出一个不依赖颜色的分组锚点。
  */
 @Composable
 fun SectionHeader(
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    accent: Color? = MaterialTheme.colorScheme.primary,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Bottom,
     ) {
+        if (accent != null) {
+            // 纯装饰：竖条只是分组的视觉锚点，读屏时不应成为独立元素。
+            Box(
+                modifier = Modifier
+                    .padding(top = 4.dp, end = 9.dp)
+                    .size(width = 3.dp, height = 18.dp)
+                    .clip(MaterialTheme.shapes.extraSmall)
+                    .background(accent)
+                    .clearAndSetSemantics { },
+            )
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             if (!subtitle.isNullOrBlank()) {
@@ -613,6 +882,7 @@ fun MiuixListRow(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     trailingText: String? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
     destructive: Boolean = false,
     enabled: Boolean = true,
@@ -628,14 +898,15 @@ fun MiuixListRow(
         else -> MaterialTheme.colorScheme.onSurface
     }
     val interaction = remember { MutableInteractionSource() }
+    val clickable = onClick != null && enabled
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (onClick != null && enabled) Modifier.pressScale(interaction, pressedScale = 0.985f) else Modifier)
+            .then(if (clickable) Modifier.pressScale(interaction, pressedScale = 0.985f) else Modifier)
             .clip(MaterialTheme.shapes.small)
             .then(
-                if (onClick != null && enabled) {
+                if (clickable) {
                     Modifier.clickable(
                         interactionSource = interaction,
                         indication = LocalIndication.current,
@@ -646,17 +917,17 @@ fun MiuixListRow(
                     Modifier
                 }
             )
-            .padding(vertical = 14.dp, horizontal = 4.dp),
+            .padding(vertical = 14.dp, horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(38.dp)
+                .size(40.dp)
                 .clip(MaterialTheme.shapes.small)
                 .background(accent.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(19.dp))
+            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -677,5 +948,56 @@ fun MiuixListRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        if (trailingContent != null) {
+            Spacer(Modifier.width(8.dp))
+            trailingContent()
+        }
+        if (clickable) {
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 统计胶囊：一个大数字 + 一行说明。
+ *
+ * hero 区用它讲「想去几家 / 去过几家 / 一共几餐」。数字带滚动动画，
+ * 但语义**锁定终值**：屏幕阅读器读到的必须是最终数字而不是动画中间值（DESIGN_SYSTEM 第十节）。
+ */
+@Composable
+fun StatCapsule(
+    value: Int,
+    label: String,
+    modifier: Modifier = Modifier,
+    accent: Color = MaterialTheme.colorScheme.primary,
+) {
+    val animated by animateIntAsState(
+        targetValue = value,
+        animationSpec = MealMotion.settle(),
+        label = "statCapsuleValue",
+    )
+    Column(
+        modifier = modifier.clearAndSetSemantics {
+            contentDescription = "$label $value"
+        },
+        horizontalAlignment = Alignment.Start,
+    ) {
+        Text(
+            text = animated.toString(),
+            style = MaterialTheme.typography.headlineMedium,
+            color = accent,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

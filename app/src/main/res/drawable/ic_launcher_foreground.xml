@@ -10,18 +10,18 @@
         android:pathData="M31,23h39c4.4,0 8,3.6 8,8v46c0,4.4 -3.6,8 -8,8h-39c-4.4,0 -8,-3.6 -8,-8v-46c0,-4.4 3.6,-8 8,-8z" />
     <!-- 右上折角 -->
     <path
-        android:fillColor="#FFDCE9DF"
+        android:fillColor="#FFF8E7CE"
         android:pathData="M62,23h8c4.4,0 8,3.6 8,8v9z" />
     <!-- 碗 -->
     <path
-        android:fillColor="#FF3F6650"
+        android:fillColor="#FF0A8558"
         android:pathData="M34,48h33c0,8.5 -6.8,15.4 -15.2,15.4h-2.6c-8.4,0 -15.2,-6.9 -15.2,-15.4z" />
     <path
-        android:fillColor="#FF3F6650"
+        android:fillColor="#FF0A8558"
         android:pathData="M39,68h23v4h-23z" />
     <!-- 蒸汽 / 味觉记号 -->
     <path
-        android:strokeColor="#FF3F6650"
+        android:strokeColor="#FF0A8558"
         android:strokeWidth="3"
         android:strokeLineCap="round"
         android:fillColor="@android:color/transparent"

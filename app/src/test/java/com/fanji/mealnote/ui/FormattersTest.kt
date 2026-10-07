@@ -165,4 +165,34 @@ class FormattersTest {
         assertEquals("¥9999", 9999.0.formatEstimatedAmount())
         assertEquals("¥1.2万", 12_340.0.formatEstimatedAmount())
     }
+
+    @Test
+    fun `无封面首字取店名第一个字`() {
+        assertEquals("老", coverInitial("老王面馆"))
+        assertEquals("蜀", coverInitial("  蜀大侠火锅  "))
+    }
+
+    @Test
+    fun `首字按完整 code point 取，不切碎 emoji`() {
+        // 店名以 emoji 开头很常见；直接 first() 会只拿到代理对的前一半，渲染成方块。
+        assertEquals("\uD83C\uDF5C", coverInitial("\uD83C\uDF5C 老张面馆"))
+        assertEquals("", coverInitial(""))
+        assertEquals("", coverInitial("   "))
+    }
+
+    @Test
+    fun `问候语按时段划分且覆盖边界`() {
+        assertEquals("早上好", greetingFor(5))
+        assertEquals("早上好", greetingFor(10))
+        assertEquals("中午好", greetingFor(11))
+        assertEquals("中午好", greetingFor(13))
+        assertEquals("下午好", greetingFor(14))
+        assertEquals("下午好", greetingFor(17))
+        assertEquals("晚上好", greetingFor(18))
+        assertEquals("晚上好", greetingFor(22))
+        // 23 点到凌晨 4 点：这个点还在翻清单的人不适合被说「早上好」。
+        assertEquals("夜深了", greetingFor(23))
+        assertEquals("夜深了", greetingFor(0))
+        assertEquals("夜深了", greetingFor(4))
+    }
 }

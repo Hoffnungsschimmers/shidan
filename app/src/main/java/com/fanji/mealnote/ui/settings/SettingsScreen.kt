@@ -24,20 +24,28 @@ import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Savings
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Storefront
+import androidx.compose.material.icons.rounded.TableChart
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -47,13 +55,16 @@ import com.fanji.mealnote.data.backup.BackupFormat
 import com.fanji.mealnote.data.settings.RANDOM_EXCLUDE_DAY_OPTIONS
 import com.fanji.mealnote.data.settings.RandomScope
 import com.fanji.mealnote.data.settings.ThemeMode
+import com.fanji.mealnote.data.settings.backupFreshnessLabel
 import com.fanji.mealnote.data.settings.randomExcludeDaysLabel
 import com.fanji.mealnote.ui.components.ConfirmDialog
 import com.fanji.mealnote.ui.components.MessageBanner
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixListRow
 import com.fanji.mealnote.ui.components.MiuixSegmented
+import com.fanji.mealnote.ui.components.MiuixTextField
 import com.fanji.mealnote.ui.components.SectionHeader
+import com.fanji.mealnote.ui.formatLedgerAmount
 import com.fanji.mealnote.ui.formatStorageSize
 import kotlinx.coroutines.delay
 
@@ -72,6 +83,8 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val monthlyBudget by viewModel.monthlyBudget.collectAsStateWithLifecycle()
+    val lastBackupAt by viewModel.lastBackupAt.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // 导出：CreateDocument 让用户自选保存位置，返回的 URI 由 SAF 授予写权限，
@@ -79,6 +92,11 @@ fun SettingsScreen(
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri -> uri?.let(viewModel::exportTo) }
+
+    // 账本 CSV 导出：同样走 SAF，返回的 URI 自带写权限。
+    val exportCsvLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv"),
+    ) { uri -> uri?.let(viewModel::exportLedgerCsv) }
 
     // 导入：OpenDocument 已限制为 zip，减少用户选错文件的概率。
     val importLauncher = rememberLauncherForActivityResult(
@@ -155,7 +173,7 @@ fun SettingsScreen(
                             MiuixListRow(
                                 icon = Icons.Rounded.Speed,
                                 title = "完整动效与实时模糊",
-                                subtitle = if (fluid) "已开启" else "已关闭，界面更省电",
+                                subtitle = if (fluid) "已开启，若滑动卡顿可关掉试试" else "已关闭，界面更流畅省电",
                                 trailingText = if (fluid) "开" else "关",
                                 onClick = { viewModel.setFluidMotion(!fluid) },
                             )
@@ -226,8 +244,38 @@ fun SettingsScreen(
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         SectionHeader(
+                            title = "账本",
+                            subtitle = "设置每月吃饭预算，足迹·账本卡会显示本月进度",
+                        )
+                        MiuixCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            elevation = 2.dp,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                        ) {
+                            MiuixListRow(
+                                icon = Icons.Rounded.Savings,
+                                title = "每月预算",
+                                subtitle = if (monthlyBudget > 0L) {
+                                    "超支时账本卡进度条会变红"
+                                } else {
+                                    "未设置，点此设定后按月对照花费"
+                                },
+                                trailingText = if (monthlyBudget > 0L) {
+                                    "¥${monthlyBudget.formatLedgerAmount()}"
+                                } else {
+                                    "未设"
+                                },
+                                onClick = viewModel::openBudgetDialog,
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        SectionHeader(
                             title = "备份与恢复",
-                            subtitle = "导出 ZIP 备份包，换机或重装后可完整恢复",
+                            subtitle = "${backupFreshnessLabel(lastBackupAt, System.currentTimeMillis(), java.time.ZoneId.systemDefault())} · 导出 ZIP 备份包，换机或重装后可完整恢复",
                         )
                         MiuixCard(
                             modifier = Modifier.fillMaxWidth(),
@@ -253,6 +301,14 @@ fun SettingsScreen(
                                 enabled = !uiState.isBusy,
                                 onClick = { importLauncher.launch(arrayOf("application/zip")) },
                             )
+                            RowDivider()
+                            MiuixListRow(
+                                icon = Icons.Rounded.TableChart,
+                                title = "导出账本 CSV",
+                                subtitle = "用餐记录导出为表格，可用 Excel / Numbers 打开",
+                                enabled = !uiState.isBusy,
+                                onClick = { exportCsvLauncher.launch(viewModel.defaultLedgerCsvName()) },
+                            )
                         }
                     }
                 }
@@ -262,6 +318,7 @@ fun SettingsScreen(
                         enabled = !uiState.isBusy,
                         onUpload = viewModel::uploadToWebDav,
                         onDownload = viewModel::downloadFromWebDav,
+                        onTest = viewModel::testWebDav,
                     )
                 }
 
@@ -339,7 +396,7 @@ fun SettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         SectionHeader(title = "关于")
                         Text(
-                            text = "味笺是一款本地优先的个人餐厅收藏与用餐记录应用。\n所有数据默认只保存在这台设备上；仅在使用服务器同步时连接你自己的服务器。",
+                            text = "食单是一款本地优先的个人餐厅收藏与用餐记录应用。\n所有数据默认只保存在这台设备上；仅在使用服务器同步时连接你自己的服务器。",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -440,17 +497,66 @@ fun SettingsScreen(
         )
     }
 
+    if (uiState.showBudgetDialog) {
+        BudgetDialog(
+            currentMinor = monthlyBudget,
+            onConfirm = viewModel::setMonthlyBudget,
+            onDismiss = viewModel::closeBudgetDialog,
+        )
+    }
+
     // 日志分享：文本经 chooser 发给微信/邮件等，消费后复位避免重复弹出。
     LaunchedEffect(uiState.pendingLogText) {
         val text = uiState.pendingLogText ?: return@LaunchedEffect
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "味笺运行日志")
+            putExtra(Intent.EXTRA_SUBJECT, "食单运行日志")
             putExtra(Intent.EXTRA_TEXT, text)
         }
         context.startActivity(Intent.createChooser(send, "导出运行日志"))
         viewModel.consumeLogText()
     }
+}
+
+/**
+ * 「设置每月预算」对话框。
+ *
+ * 输入元、内部转成整数分(见 `parseBudgetYuanToMinor`)。留空即清除预算。
+ */
+@Composable
+private fun BudgetDialog(
+    currentMinor: Long,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by rememberSaveable {
+        mutableStateOf(if (currentMinor > 0L) currentMinor.formatLedgerAmount() else "")
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = MaterialTheme.shapes.extraLarge,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = { Text("每月预算", style = MaterialTheme.typography.titleLarge) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "设置每月吃饭预算（元）。留空或填 0 则取消预算。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                MiuixTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = "预算金额（元）",
+                    placeholder = "例如 2000",
+                    singleLine = true,
+                    keyboardType = KeyboardType.Decimal,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 /**

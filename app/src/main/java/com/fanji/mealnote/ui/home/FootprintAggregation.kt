@@ -1,5 +1,8 @@
 package com.fanji.mealnote.ui.home
 
+import androidx.compose.runtime.Immutable
+import com.fanji.mealnote.data.local.Verdict
+import com.fanji.mealnote.ui.components.YearReviewCardData
 import com.fanji.mealnote.ui.formatMonthLabel
 import com.fanji.mealnote.ui.parseEstimatedAmount
 import java.time.Instant
@@ -118,3 +121,103 @@ internal fun List<FootprintEntry>.toTopRestaurants(limit: Int = MAX_TOP_RESTAURA
 internal fun List<FootprintEntry>.toSections(): List<FootprintSection> =
     groupBy { it.record.eatenAt.formatMonthLabel() }
         .map { (title, entries) -> FootprintSection(title, entries) }
+
+/**
+ * 一年的汇总:用餐次数 + 入账总额(分) + 估算花费(元)。
+ *
+ * [ledgerMinor] / [estimatedYuan] 为 `null` 表示该年没有任何入账 / 可识别金额
+ * (与其它口径一致:`null` ≠ 0,「没记」不等于「没花」)。
+ */
+@Immutable
+data class YearSummary(
+    val year: Int,
+    val visitCount: Int,
+    val ledgerMinor: Long?,
+    val estimatedYuan: Double?,
+)
+
+/**
+ * 历年汇总,按年份**倒序**(最近的在上)。
+ *
+ * 让用户不用切换年份就能一眼比较各年的次数与花销;时区作参数,跨年归属可测试固定。
+ */
+internal fun List<FootprintEntry>.yearlySummaries(zone: ZoneId): List<YearSummary> =
+    groupBy { it.record.eatenAt.toYearMonth(zone).year }
+        .map { (year, entries) ->
+            YearSummary(
+                year = year,
+                visitCount = entries.size,
+                ledgerMinor = entries.mapNotNull { it.ledgerAmountMinor() }
+                    .takeIf { it.isNotEmpty() }?.sum(),
+                estimatedYuan = entries.mapNotNull { it.estimatedAmount() }
+                    .takeIf { it.isNotEmpty() }?.sum(),
+            )
+        }
+        .sortedByDescending { it.year }
+
+/**
+ * 足迹搜索：关键字是否命中这条记录。
+ *
+ * 覆盖**店名 / 地址 / 餐品 / 花费原文 / 备注**——用户找旧记录时,记得住的往往是
+ * 「那次吃了什么」或「花了多少」,而不是店名(这也是足迹搜索比清单更宽的原因)。
+ * 英文忽略大小写;空关键字视为全部命中(调用方通常在空词时直接返回全集)。
+ *
+ * 从 `FootprintViewModel` 的私有函数下沉为 internal 顶层纯函数,以便直接单测。
+ */
+internal fun FootprintEntry.matchesQuery(keyword: String): Boolean =
+    restaurantName.contains(keyword, ignoreCase = true) ||
+        restaurantAddress.contains(keyword, ignoreCase = true) ||
+        record.dishes.contains(keyword, ignoreCase = true) ||
+        record.priceText.contains(keyword, ignoreCase = true) ||
+        record.note.contains(keyword, ignoreCase = true)
+
+/** 按评价筛选时间线;[VerdictFilter.ALL] 原样返回。 */
+internal fun List<FootprintEntry>.filterByVerdict(filter: VerdictFilter): List<FootprintEntry> =
+    when (filter) {
+        VerdictFilter.ALL -> this
+        VerdictFilter.GOOD -> filter { it.record.verdict == Verdict.GOOD }
+        VerdictFilter.MEH -> filter { it.record.verdict == Verdict.MEH }
+        VerdictFilter.BAD -> filter { it.record.verdict == Verdict.BAD }
+    }
+
+/** 这批条目的入账合计(分);一条都没入账返回 null(null≠0)。用于时间线月份分组小计。 */
+internal fun List<FootprintEntry>.ledgerSumOrNull(): Long? =
+    mapNotNull { it.ledgerAmountMinor() }
+        .takeIf { it.isNotEmpty() }
+        ?.sum()
+
+/** 指定自然月的用餐次数(按 [zone] 判定归属)。 */
+internal fun List<FootprintEntry>.countInMonth(month: YearMonth, zone: ZoneId): Int =
+    count { it.record.eatenAt.toYearMonth(zone) == month }
+
+/**
+ * 每年一张「年度回顾」卡片的数据,按年份倒序。
+ *
+ * 比 [yearlySummaries] 多算了最常去的店与评价分布,供分享卡片使用。最常去的店按次数倒序、
+ * 同次数按 restaurantId 升序(稳定,与其它排行一致);花费口径 ledger 优先、其次估算,均可为 null。
+ */
+internal fun List<FootprintEntry>.yearReviews(zone: ZoneId): List<YearReviewCardData> =
+    groupBy { it.record.eatenAt.toYearMonth(zone).year }
+        .map { (year, entries) ->
+            val top = entries.groupingBy { it.record.restaurantId }.eachCount()
+                .entries
+                .sortedWith(compareByDescending<Map.Entry<Long, Int>> { it.value }.thenBy { it.key })
+                .firstOrNull()
+            val topName = top?.let { t ->
+                entries.first { it.record.restaurantId == t.key }.restaurantName
+            }
+            YearReviewCardData(
+                year = year,
+                visitCount = entries.size,
+                ledgerMinor = entries.mapNotNull { it.ledgerAmountMinor() }
+                    .takeIf { it.isNotEmpty() }?.sum(),
+                estimatedYuan = entries.mapNotNull { it.estimatedAmount() }
+                    .takeIf { it.isNotEmpty() }?.sum(),
+                topRestaurantName = topName,
+                topRestaurantVisits = top?.value ?: 0,
+                goodCount = entries.count { it.record.verdict == Verdict.GOOD },
+                mehCount = entries.count { it.record.verdict == Verdict.MEH },
+                badCount = entries.count { it.record.verdict == Verdict.BAD },
+            )
+        }
+        .sortedByDescending { it.year }

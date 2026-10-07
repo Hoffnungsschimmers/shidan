@@ -1,5 +1,7 @@
 package com.fanji.mealnote.ui.home
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,9 +24,11 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Restaurant
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -55,6 +60,8 @@ import com.fanji.mealnote.ui.components.MiuixSegmented
 import com.fanji.mealnote.ui.components.PageHeader
 import com.fanji.mealnote.ui.components.PhotoViewerHost
 import com.fanji.mealnote.ui.components.VerdictBadge
+import com.fanji.mealnote.ui.components.YearReviewCardData
+import com.fanji.mealnote.ui.components.YearReviewSheet
 import com.fanji.mealnote.ui.components.isFluidMotion
 import com.fanji.mealnote.ui.components.rememberPhotoViewerState
 import com.fanji.mealnote.ui.components.staggeredEnter
@@ -80,6 +87,16 @@ fun FootprintScreen(
     val photoViewer = rememberPhotoViewerState()
     val fluid = isFluidMotion
     var tab by rememberSaveable { mutableStateOf(FootprintTab.TIMELINE) }
+    var shareYear by remember { mutableStateOf<YearReviewCardData?>(null) }
+    val context = LocalContext.current
+    val pendingShareUri by viewModel.pendingShareUri.collectAsStateWithLifecycle()
+
+    // 年度回顾图写好后发起系统分享;消费掉 URI,避免返回本页重复弹分享面板。
+    LaunchedEffect(pendingShareUri) {
+        val uri = pendingShareUri ?: return@LaunchedEffect
+        context.startActivity(buildImageShareIntent(uri))
+        viewModel.consumeShareUri()
+    }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -87,10 +104,10 @@ fun FootprintScreen(
             contentPadding = PaddingValues(
                 start = 20.dp,
                 end = 20.dp,
-                top = 10.dp,
+                top = 14.dp,
                 bottom = MainContentBottomPadding,
             ),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item(key = "header") {
                 PageHeader(
@@ -98,7 +115,12 @@ fun FootprintScreen(
                     subtitle = "每一次吃饭都记在这里。",
                     trailing = if (uiState.totalCount > 0) {
                         {
-                            Row(verticalAlignment = Alignment.Bottom) {
+                            Row(
+                                verticalAlignment = Alignment.Bottom,
+                                modifier = Modifier.clearAndSetSemantics {
+                                    contentDescription = "共 ${uiState.totalCount} 次用餐"
+                                },
+                            ) {
                                 AnimatedCounter(
                                     value = uiState.totalCount,
                                     style = MaterialTheme.typography.headlineMedium,
@@ -126,6 +148,7 @@ fun FootprintScreen(
                     tab = tab,
                     onTabChange = { tab = it },
                     onQueryChange = viewModel::onQueryChange,
+                    onVerdictFilterChange = viewModel::onVerdictFilterChange,
                     onOpenRestaurant = onOpenRestaurant,
                     onPhotoClick = { entry, index ->
                         photoViewer.open(entry.photos.map { it.filePath }, index)
@@ -135,13 +158,38 @@ fun FootprintScreen(
                 FootprintTab.STATS -> statsContent(
                     uiState = uiState,
                     onOpenRestaurant = onOpenRestaurant,
+                    onShareYear = { year ->
+                        shareYear = uiState.yearReviews.firstOrNull { it.year == year }
+                    },
                 )
             }
         }
 
         PhotoViewerHost(photoViewer)
     }
+
+    shareYear?.let { data ->
+        YearReviewSheet(
+            data = data,
+            onShare = { bitmap ->
+                viewModel.shareYearReview(bitmap)
+                shareYear = null
+            },
+            onDismiss = { shareYear = null },
+        )
+    }
 }
+
+/** 构造图片分享 Intent(与详情页分享同一套 flag,缺一不可)。 */
+private fun buildImageShareIntent(uri: Uri): Intent =
+    Intent.createChooser(
+        Intent(Intent.ACTION_SEND).apply {
+            type = "image/png"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        },
+        "分享到",
+    )
 
 /**
  * 「足迹」的两种查看方式。
@@ -171,6 +219,7 @@ private fun LazyListScope.timelineContent(
     tab: FootprintTab,
     onTabChange: (FootprintTab) -> Unit,
     onQueryChange: (String) -> Unit,
+    onVerdictFilterChange: (VerdictFilter) -> Unit,
     onOpenRestaurant: (Long) -> Unit,
     onPhotoClick: (FootprintEntry, Int) -> Unit,
 ) {
@@ -193,6 +242,15 @@ private fun LazyListScope.timelineContent(
                 onSelect = onTabChange,
                 label = { it.label },
             )
+            // 按评价筛选时间线;没有任何记录时不显示(无从筛起)。
+            if (uiState.totalCount > 0) {
+                MiuixSegmented(
+                    options = VerdictFilter.entries.toList(),
+                    selected = uiState.verdictFilter,
+                    onSelect = onVerdictFilterChange,
+                    label = { it.label },
+                )
+            }
         }
     }
 
@@ -200,11 +258,12 @@ private fun LazyListScope.timelineContent(
         uiState.isLoading -> item(key = "loading") { LoadingBlock(label = "正在加载足迹…") }
 
         uiState.sections.isEmpty() -> item(key = "empty") {
+            val filtered = uiState.isSearchMiss || uiState.verdictFilter != VerdictFilter.ALL
             EmptyStateBlock(
                 icon = Icons.Rounded.Restaurant,
-                title = if (uiState.isSearchMiss) "没有找到相关记录" else "还没有用餐记录",
-                message = if (uiState.isSearchMiss) {
-                    "换个关键词试试，店名、餐品、备注都可以搜。"
+                title = if (filtered) "没有符合条件的记录" else "还没有用餐记录",
+                message = if (filtered) {
+                    "换个关键词或评价筛选试试。"
                 } else {
                     "吃过之后点右下角的加号，记下评价和花费。"
                 },
@@ -213,13 +272,7 @@ private fun LazyListScope.timelineContent(
 
         else -> uiState.sections.forEach { section ->
             item(key = "month-${section.title}") {
-                Text(
-                    text = section.title,
-                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 2.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                MonthHeader(section)
             }
             itemsIndexed(
                 items = section.entries,
@@ -238,10 +291,42 @@ private fun LazyListScope.timelineContent(
     }
 }
 
+/** 时间线月份分组标题:月份 + 该月次数(和入账小计,若有)。随搜索/评价筛选联动。 */
+@Composable
+private fun MonthHeader(section: FootprintSection) {
+    val count = section.entries.size
+    val ledger = section.entries.ledgerSumOrNull()
+    val summary = buildString {
+        append("$count 次")
+        if (ledger != null) append(" · ¥${ledger.formatLedgerAmount()}")
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp, bottom = 2.dp)
+            .clearAndSetSemantics { contentDescription = "${section.title}，$summary" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = section.title,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 /** 统计内容。 */
 private fun LazyListScope.statsContent(
     uiState: FootprintUiState,
     onOpenRestaurant: (Long) -> Unit,
+    onShareYear: (Int) -> Unit,
 ) {
     if (!uiState.hasStats) {
         item(key = "stats-empty") {
@@ -254,12 +339,22 @@ private fun LazyListScope.statsContent(
         return
     }
 
+    // 先把「钱」讲完（账本口径，精确）：今年总额 → 月度趋势 → 花钱最多。
     item(key = "stats-overview") { OverviewCard(uiState) }
+    // 历年汇总:有跨年数据时才显示,一眼比较各年次数与花销(免去逐年切换)。
+    if (uiState.yearlySummaries.size >= 2) {
+        item(key = "stats-yearly") { YearlySummaryCard(uiState.yearlySummaries, onShareYear) }
+    }
     item(key = "stats-ledger") { LedgerCard(uiState) }
     if (uiState.ledgerSpendThisYear != null) {
         item(key = "stats-ledger-monthly") { LedgerMonthlyCard(uiState.ledgerMonthlyAmounts) }
     }
-    item(key = "stats-spend") { SpendCard(uiState) }
+    if (uiState.topSpendRestaurants.isNotEmpty()) {
+        item(key = "stats-top-spend") {
+            TopSpendCard(uiState.topSpendRestaurants, onOpenRestaurant)
+        }
+    }
+    // 再讲「吃」的习惯：次数趋势 → 评价分布 → 常去的店。
     item(key = "stats-monthly") { MonthlyCard(uiState.monthlyCounts) }
     item(key = "stats-verdict") { VerdictCard(uiState) }
     if (uiState.topRestaurants.isNotEmpty()) {
@@ -267,9 +362,69 @@ private fun LazyListScope.statsContent(
             TopRestaurantsCard(uiState.topRestaurants, onOpenRestaurant)
         }
     }
-    if (uiState.topSpendRestaurants.isNotEmpty()) {
-        item(key = "stats-top-spend") {
-            TopSpendCard(uiState.topSpendRestaurants, onOpenRestaurant)
+    // 最后是花费「估算」——来自自由文本、不精确，作为账本的补充放在末尾，视觉上弱化。
+    item(key = "stats-spend") { SpendCard(uiState) }
+}
+
+/** 历年汇总卡:每年一行,次数 + 入账(或估算)总额;点击某年生成年度回顾分享图。 */
+@Composable
+private fun YearlySummaryCard(summaries: List<YearSummary>, onShareYear: (Int) -> Unit) {
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 2.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        Text("历年", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = "点某一年可生成年度回顾分享图",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(14.dp))
+        summaries.forEachIndexed { index, summary ->
+            if (index > 0) Spacer(Modifier.height(12.dp))
+            val amountText = when {
+                summary.ledgerMinor != null -> "¥${summary.ledgerMinor.formatLedgerAmount()}"
+                summary.estimatedYuan != null -> "约${summary.estimatedYuan.formatEstimatedAmount()}"
+                else -> null
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onShareYear(summary.year) }
+                    .clearAndSetSemantics {
+                        contentDescription = buildString {
+                            append("${summary.year} 年,${summary.visitCount} 次")
+                            if (amountText != null) append("，$amountText")
+                        }
+                        role = Role.Button
+                        onClick(label = "生成年度回顾") {
+                            onShareYear(summary.year)
+                            true
+                        }
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "${summary.year} 年",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = "${summary.visitCount} 次",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (amountText != null) {
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = amountText,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
         }
     }
 }
@@ -283,6 +438,7 @@ private fun OverviewCard(uiState: FootprintUiState) {
         contentPadding = PaddingValues(18.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            StatCell("本月", uiState.monthCount, "次", Modifier.weight(1f))
             StatCell("今年", uiState.yearCount, "次", Modifier.weight(1f))
             StatCell("去过", uiState.visitedCount, "家", Modifier.weight(1f))
             StatCell("累计", uiState.totalCount, "次", Modifier.weight(1f))
@@ -323,10 +479,10 @@ private fun StatCell(label: String, value: Int, unit: String, modifier: Modifier
 }
 
 /**
- * 花费估算卡。
+ * 花费估算卡（次要）。
  *
- * 金额来自**自由文本的解析**，因此文案必须始终带着「估算」二字，
- * 并明确说明可识别的记录比例 —— 否则用户会把它当成精确的账本。
+ * 金额来自**自由文本的解析**,只作为账本的补充参考,视觉上刻意弱于账本卡:
+ * 标题带「估算」、数字不使用大号 headline、说明合并为一行,避免与账本的精确金额争夺注意力。
  */
 @Composable
 private fun SpendCard(uiState: FootprintUiState) {
@@ -351,24 +507,20 @@ private fun SpendCard(uiState: FootprintUiState) {
         } else {
             Text(
                 text = spend.formatEstimatedAmount(),
-                style = MaterialTheme.typography.headlineLarge,
-                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             text = buildString {
                 val recognized = uiState.amountRecognizedCount
                 val unrecognized = uiState.amountUnrecognizedCount
-                append("今年 $recognized 条记录里有可识别的数字")
-                if (unrecognized > 0) append("，另有 $unrecognized 条写的是文字")
+                append("按记录里的数字估算，非精确账目")
+                if (recognized > 0) append("；今年 $recognized 条可识别")
+                if (unrecognized > 0) append("，$unrecognized 条为文字")
             },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "按记录里的数字估算，不是精确账目。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
         )
@@ -616,6 +768,66 @@ private fun LedgerCard(uiState: FootprintUiState) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
         }
+
+        // 每月预算进度（设置了预算才显示；本月花费对预算，超支变红）。
+        val budget = monthlyBudgetProgress(uiState.ledgerSpendThisMonth, uiState.monthlyBudgetMinor)
+        if (budget != null) {
+            Spacer(Modifier.height(16.dp))
+            BudgetProgressBlock(budget)
+        }
+    }
+}
+
+@Composable
+private fun BudgetProgressBlock(progress: BudgetProgress) {
+    val accent = when {
+        progress.overBudget -> MaterialTheme.colorScheme.error
+        progress.fraction >= 0.85f -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.primary
+    }
+    val statusText = if (progress.overBudget) {
+        "已超预算 ${(-progress.remainingMinor).formatLedgerAmount()}"
+    } else {
+        "本月还剩 ${progress.remainingMinor.formatLedgerAmount()}"
+    }
+    Column(
+        modifier = Modifier.clearAndSetSemantics {
+            contentDescription = "本月预算 ¥${progress.budgetMinor.formatLedgerAmount()}，" +
+                "已花 ¥${progress.spentMinor.formatLedgerAmount()}，$statusText"
+        },
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Text(
+                text = "本月预算",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "${progress.spentMinor.formatLedgerAmount()} / ${progress.budgetMinor.formatLedgerAmount()}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        LinearProgressIndicator(
+            progress = { progress.fraction.coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp)),
+            color = accent,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (progress.overBudget) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

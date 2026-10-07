@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Payments
 import androidx.compose.material.icons.rounded.RestaurantMenu
@@ -43,6 +44,7 @@ import com.fanji.mealnote.ui.components.LoadingBlock
 import com.fanji.mealnote.ui.components.MealDateRow
 import com.fanji.mealnote.ui.components.MealPhotoSection
 import com.fanji.mealnote.ui.components.MiuixButton
+import com.fanji.mealnote.ui.components.MiuixButtonStyle
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixTextField
 import com.fanji.mealnote.ui.components.AmountLedgerSection
@@ -67,9 +69,27 @@ fun EditVisitScreen(
     val photoViewer = rememberPhotoViewerState()
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
     var pendingCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
+    // 与新增页一致:记账/备注默认折叠。但编辑已有记录时,若这条本来就填过备注、
+    // 手动改过金额或人数>1,则加载后自动展开一次,免得用户以为数据丢了(此后尊重手动开合)。
+    var showMore by rememberSaveable { mutableStateOf(false) }
+    var autoExpandApplied by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(recordId) { viewModel.setRecordId(recordId) }
     LaunchedEffect(uiState.saved) { if (uiState.saved) onSaved() }
+    LaunchedEffect(
+        uiState.isLoading,
+        uiState.notFound,
+        uiState.note,
+        uiState.amountOverridden,
+        uiState.personCount,
+    ) {
+        if (!autoExpandApplied && !uiState.isLoading && !uiState.notFound) {
+            if (uiState.note.isNotBlank() || uiState.amountOverridden || uiState.personCount > 1) {
+                showMore = true
+            }
+            autoExpandApplied = true
+        }
+    }
 
     val galleryPicker = rememberGalleryPicker(
         maxItems = com.fanji.mealnote.ui.visit.MAX_VISIT_PHOTOS,
@@ -157,17 +177,6 @@ fun EditVisitScreen(
                     }
 
                     item {
-                        AmountLedgerSection(
-                            amountMinor = uiState.effectiveAmountMinor,
-                            personCount = uiState.personCount,
-                            overridden = uiState.amountOverridden,
-                            onPersonCountChange = viewModel::onPersonCountChange,
-                            onAmountManualSet = viewModel::onAmountManualSet,
-                            onAmountAutoRestore = viewModel::onAmountAutoRestore,
-                        )
-                    }
-
-                    item {
                         MealPhotoSection(
                             title = "照片",
                             subtitle = "选填，最多 ${com.fanji.mealnote.ui.visit.MAX_VISIT_PHOTOS} 张",
@@ -186,15 +195,38 @@ fun EditVisitScreen(
                         )
                     }
 
-                    item {
-                        MiuixTextField(
-                            value = uiState.note,
-                            onValueChange = viewModel::onNoteChange,
-                            label = "补充记录（选填）",
-                            placeholder = "环境、服务、下次想点什么，随便写",
-                            minLines = 3,
-                            maxLines = 6,
-                        )
+                    if (showMore) {
+                        item {
+                            AmountLedgerSection(
+                                amountMinor = uiState.effectiveAmountMinor,
+                                personCount = uiState.personCount,
+                                overridden = uiState.amountOverridden,
+                                onPersonCountChange = viewModel::onPersonCountChange,
+                                onAmountManualSet = viewModel::onAmountManualSet,
+                                onAmountAutoRestore = viewModel::onAmountAutoRestore,
+                            )
+                        }
+
+                        item {
+                            MiuixTextField(
+                                value = uiState.note,
+                                onValueChange = viewModel::onNoteChange,
+                                label = "补充记录（选填）",
+                                placeholder = "环境、服务、下次想点什么，随便写",
+                                minLines = 3,
+                                maxLines = 6,
+                            )
+                        }
+                    } else {
+                        item {
+                            MiuixButton(
+                                label = "记账金额、就餐人数、备注（选填）",
+                                onClick = { showMore = true },
+                                style = MiuixButtonStyle.Text,
+                                icon = Icons.Rounded.Add,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
 
                     item { FormErrorLine(message = uiState.errorMessage) }
