@@ -9,9 +9,11 @@
 WebDAV 连通性检查、重复店名提醒、年度回顾卡片、单店累计入账。上一版 v0.5.1（15）是随机选店
 按评价范围 + 搜索覆盖餐品名；v0.5.0（14）落地记账核心（结构化入账金额，schema v3 → v4）。
 
-> ⚠️ v0.6.0 **只过了编译与 JVM 测试，没有在真机上跑过一次，也未出包交付到 `apk/`**。
+> ⚠️ v0.6.0 **只过了编译与 JVM 测试，没有在真机上跑过一次**。
 > 排版、深色模式、大字体裁字、TalkBack、流畅模式降级外观一律未经确认；
 > WebDAV 同步与连通性检查尚未在真实服务器上验证通过（AGENTS §5-3 的发布门槛仍未解锁）。
+> 交付包：`apk/食单-v0.6.0-release.apk`（证书与 v0.5.1 release 逐字一致，可直接覆盖升级、数据保留）
+> 与 `apk/食单-v0.6.0-debug.apk`（与历次 debug 包同 debug 证书）。**debug 与 release 之间跨类型安装会被签名拒绝。**
 > 逐项明细见 `CHANGELOG.md` 0.6.0 节。
 
 **信息架构**（底部三栏）
@@ -181,8 +183,8 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 | `testDebugUnitTest`（`--rerun` 强制实跑） | 28 个套件 / 252 个用例全部通过，0 失败 0 错误 |
 | `scripts/run-unit-tests.ps1` | 同上（从源码发现 28 个测试类，`OK (252 tests)`） |
 | `lintDebug` | 通过，报告 `No issues found` |
-| `assembleDebug` | 通过（versionCode 16，versionName 0.6.0，label 食单）；产物仅在 `app/build/outputs/`，**未复制进 `apk/`** |
-| `assembleRelease` | 通过（R8 混淆 + 资源裁剪），`apksigner verify` 退出码 0，签名者 `CN=MealNote` |
+| `assembleDebug` | 通过（versionCode 16，versionName 0.6.0，label 食单）；已交付 `C:\Users\2540\Desktop\mealnote\apk\食单-v0.6.0-debug.apk`（19,146,184 B） |
+| `assembleRelease` | 通过（R8 混淆 + 资源裁剪），`apksigner verify` 退出码 0；已交付 `C:\Users\2540\Desktop\mealnote\apk\食单-v0.6.0-release.apk`（2,127,811 B），证书与 v0.5.1 release 逐字一致（`9cf9cd69…`），可覆盖安装保数据 |
 
 > 构建能过 ≠ 功能可用：本机无真机/模拟器，**UI 与 WebDAV 远程路径均未经验证**（见 ROADMAP 第七/九节）。
 

@@ -35,7 +35,7 @@
 | 工作区 | 本轮整理后**全部入库**（含此前压着的 37 个文件 `+3429 / −1001` 与 ≈30 个未跟踪文件） |
 | 数据库 | Room version **4**，identityHash `b93fd210509db5642fb4c1aed52f6a14`（v0.6.0 **无 schema 变更**） |
 | 测试 | **28 个 JVM 套件 / 252 例**，2026-10-06 实测全过 + 1 个从未运行过的迁移仪器测试 |
-| 验证门槛 | 单测 / `lintDebug` / `assembleDebug` / `assembleRelease` 全过，`apksigner verify` 退出码 0；产物只在 `app/build/outputs/`，**未复制进 `apk/`** |
+| 验证门槛 | 单测 / `lintDebug` / `assembleDebug` / `assembleRelease` 全过，`apksigner verify` 退出码 0；已交付 `apk/食单-v0.6.0-{debug,release}.apk`（release 证书与 v0.5.1 release 一致，可覆盖安装） |
 | 未解锁 | **设备验证**与 WebDAV **真实服务器验证**（AGENTS §5-3）——见第十四节 |
 
 v0.6.0 由三块互相交叠的工作合并而成（ROADMAP 原本拆在 v0.5.2 / v0.6.0 / v0.6.x 三个版本）：

@@ -2,7 +2,7 @@
 
 本项目遵循语义化版本思路记录主要变更。
 
-## 0.6.0（2026-10-06 · 未交付到 `apk/` · 未经设备验证）
+## 0.6.0（2026-10-07 · 已出包，待真机与真实服务器验证）
 
 ROADMAP 原本把这些内容拆在 v0.5.2、v0.6.0、v0.6.x 三个版本里，实际开发是同一批未提交工作，
 `SettingsScreen.kt` 等文件同时承载多个功能，按版本拆提交拆不干净，因此合为一条记录。
@@ -101,7 +101,9 @@ Lint     ：lintDebug 通过，报告 No issues found
 签名     ：apksigner verify 退出码 0（签名者 CN=MealNote）
 包体     ：aapt2 dump badging → package com.fanji.mealnote / versionCode 16 / 0.6.0 / label 食单
 数据库   ：version 4（本版未改动 schema）
-交付     ：产物只在 app/build/outputs/，未复制进 apk/
+交付     ：apk/食单-v0.6.0-release.apk（2,127,811 B）与 -debug.apk（19,146,184 B），
+          与 app/build/outputs 下的产物 cmp 逐字节一致；release 证书摘要与 v0.5.1 release
+          完全相同（9cf9cd69…），debug 证书与历次 debug 包相同 → 同类型可覆盖安装、数据保留
 ```
 
 **仍未解锁的门槛**：本机无真机/模拟器，全部 UI 与动效改动未经设备确认；
