@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -19,6 +20,8 @@ import com.fanji.mealnote.ui.detail.RestaurantDetailScreen
 import com.fanji.mealnote.ui.edit.EditRestaurantScreen
 import com.fanji.mealnote.ui.edit.EditVisitScreen
 import com.fanji.mealnote.ui.home.MainScaffold
+import com.fanji.mealnote.ui.settings.SettingsSection
+import com.fanji.mealnote.ui.settings.SettingsSectionScreen
 import com.fanji.mealnote.ui.visit.AddVisitScreen
 import com.fanji.mealnote.ui.visit.PickRestaurantScreen
 
@@ -49,6 +52,14 @@ object Routes {
     const val EDIT_VISIT = "visit/{recordId}/edit"
     const val PICK_RESTAURANT = "pick_restaurant"
 
+    /**
+     * 「我的」的二级分区页。
+     *
+     * 用 slug 字符串而不是枚举名做参数：路由是外部可见的字符串，枚举重命名会静默断链，
+     * 而 slug 显式固定在枚举里。未知 slug 回落清单页，不进空白页。
+     */
+    const val SETTINGS_SECTION = "settings/{section}"
+
     /** 「无来源记录」哨兵。记录 id 由数据库自增，恒为正数。 */
     const val NO_COPY_SOURCE = -1L
 
@@ -62,6 +73,8 @@ object Routes {
     fun editRestaurant(restaurantId: Long): String = "restaurant/$restaurantId/edit"
 
     fun editVisit(recordId: Long): String = "visit/$recordId/edit"
+
+    fun settingsSection(section: SettingsSection): String = "settings/${section.slug}"
 }
 
 /**
@@ -130,6 +143,9 @@ fun MealNoteApp() {
                 onOpenRestaurant = { id -> navController.navigate(Routes.restaurantDetail(id)) },
                 onAddRestaurant = { navController.navigate(Routes.addRestaurant()) },
                 onStartVisit = { navController.navigate(Routes.PICK_RESTAURANT) },
+                onOpenSettingsSection = { section ->
+                    navController.navigate(Routes.settingsSection(section))
+                },
             )
         }
 
@@ -162,6 +178,23 @@ fun MealNoteApp() {
                 onPick = { id -> navController.openVisitForm(id) },
                 onCreateNew = { navController.navigate(Routes.addRestaurant(nextVisit = true)) },
             )
+        }
+
+        composable(
+            route = Routes.SETTINGS_SECTION,
+            arguments = listOf(navArgument("section") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val section = SettingsSection.fromSlug(backStackEntry.arguments?.getString("section"))
+            if (section == null) {
+                // 未知分区（旧链接、手输路由、枚举改名）不建空白页：
+                // 直接弹掉这一条，回到用户原本所在的页面。
+                LaunchedEffect(backStackEntry.id) { navController.popBackStack() }
+            } else {
+                SettingsSectionScreen(
+                    section = section,
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
 
         composable(

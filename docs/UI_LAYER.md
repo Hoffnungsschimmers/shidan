@@ -170,7 +170,7 @@
 
 ### 5.1 主题令牌(theme/)
 
-- `Color.kt`:**暖食欲**色板。浅色 Canvas `#F6F1EA`(暖米白)/Surface `#FFFFFF`/Primary 深翠绿 `#0A8558`/Secondary 琥珀褐 `#9E570F`/Tertiary 暖石灰 `#6B6459`/Error 暖红 `#C33A32`;深色走暖炭 Canvas `#131110`、Primary 提亮 `#4FD39A`。另有两档**纯装饰**:`*Vivid`(`#12B377`/`#D9822B`,配白字不足 AA,故不承载文字)与陶土红 `#B4453A`(只允许进分享卡/年度回顾这类脱离应用状态的图片版面,**禁止**进入任何状态语义)。阴影色改暖棕偏移 `#241A10`(上一版冷蓝灰 `#202A3A` 压在暖底上会发脏,这是卡片「灰扑扑」的根因)。玻璃着色同改暖白/暖炭。语义色分工全局固定。
+- `Color.kt`:**纯白底 · 暖白浮层**色板。浅色 Canvas `#FFFFFF`(纯白)/Surface `#FBF8F4`(暖白卡片,配 1px `#EFE9E1` 描边 + 暖棕阴影)/Primary 深翠绿 `#0A8558`/Secondary 琥珀褐 `#9E570F`/Tertiary 暖石灰 `#6B6459`/Error 暖红 `#C33A32`;深色走暖炭 Canvas `#131110`、Primary 提亮 `#4FD39A`。另有两档**纯装饰**:`*Vivid`(`#12B377`/`#D9822B`,配白字不足 AA,故不承载文字)与陶土红 `#B4453A`(只允许进分享卡/年度回顾这类脱离应用状态的图片版面,**禁止**进入任何状态语义)。阴影色改暖棕偏移 `#241A10`(上一版冷蓝灰 `#202A3A` 压在暖底上会发脏,这是卡片「灰扑扑」的根因)。玻璃着色同改暖白/暖炭。语义色分工全局固定。
 - `Theme.kt`:`lightColorScheme`/`darkColorScheme`;圆角阶梯 `AppShapes` **10/16/20/26/32dp**(封面变大后整体上调一档,小圆角包住大图会「没包住」);**`MealTokens`**(M3 无槽位补充令牌:shadowAmbient/Spot、primaryShadow、glass*、`primaryVivid`、`primaryDeep`(实心按钮渐变暗端)、`secondaryVivid`、`accentTerracotta`、`heroGradient`、isDark)经 `staticCompositionLocalOf` 下发,`MaterialTheme.mealTokens` 访问;`Modifier.softShadow(shape, elevation, ambient, spot)` 固定 `clip=false` 取主题阴影色;`MealNoteTheme(darkTheme)` 组装。
 - `Type.kt`:`FontFamily.SansSerif`;大标题负字距(displayMedium 40/-1.0、displaySmall 34/-0.8、headlineSmall 22/-0.2…)。**本轮补齐 `headlineSmall`(22sp,卡片店名)、`titleSmall`(14sp SemiBold)、`displayMedium`**:`headlineSmall` 此前已被 `ShareCard.kt` 引用却从未声明,一直静默落到 M3 默认值(字号对不上、字重是 Regular)。
 

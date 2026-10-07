@@ -157,6 +157,8 @@ fun FootprintScreen(
 
                 FootprintTab.STATS -> statsContent(
                     uiState = uiState,
+                    tab = tab,
+                    onTabChange = { tab = it },
                     onOpenRestaurant = onOpenRestaurant,
                     onShareYear = { year ->
                         shareYear = uiState.yearReviews.firstOrNull { it.year == year }
@@ -322,12 +324,37 @@ private fun MonthHeader(section: FootprintSection) {
     }
 }
 
-/** 统计内容。 */
+/**
+ * 统计内容。
+ *
+ * 分段控件必须在这里也出现一次：它原本只长在 [timelineContent] 的吸顶栏里，
+ * 切到「统计」后就没有回到「时间线」的入口（真机反馈的「点击统计后无法返回」）。
+ * 空数据分支同样要在控件之下，否则「还没有可统计的数据」时也被困住。
+ */
+@OptIn(ExperimentalFoundationApi::class)
 private fun LazyListScope.statsContent(
     uiState: FootprintUiState,
+    tab: FootprintTab,
+    onTabChange: (FootprintTab) -> Unit,
     onOpenRestaurant: (Long) -> Unit,
     onShareYear: (Int) -> Unit,
 ) {
+    stickyHeader(key = "stats-toolbar") {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(bottom = 8.dp),
+        ) {
+            MiuixSegmented(
+                options = FootprintTab.entries.toList(),
+                selected = tab,
+                onSelect = onTabChange,
+                label = { it.label },
+            )
+        }
+    }
+
     if (!uiState.hasStats) {
         item(key = "stats-empty") {
             EmptyStateBlock(

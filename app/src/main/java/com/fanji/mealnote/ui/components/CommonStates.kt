@@ -97,7 +97,12 @@ fun MealSearchField(
         label = "searchContainer",
     )
     val borderColor by animateColorAsState(
-        targetValue = if (focused) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else Color.Transparent,
+        // 同色零不透明度，而不是 Color.Transparent（透明黑）：后者会让描边淡入途中发灰。
+        targetValue = if (focused) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+        } else {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0f)
+        },
         animationSpec = MealMotion.quick(),
         label = "searchBorder",
     )

@@ -3,41 +3,41 @@ package com.fanji.mealnote.ui.theme
 import androidx.compose.ui.graphics.Color
 
 /**
- * 「食单」调色板 —— **暖食欲**体系。
+ * 「食单」调色板 —— **纯白底 · 暖白浮层**体系。
  *
- * 与上一版（中性冷灰底 + 青翠绿）的关键差异：
+ * 页面底色是**纯白**（真机反馈：喜欢纯白背景）。但卡片此前靠「暖米白底 + 纯白浮层」的
+ * **色差**浮起来，底一改白，卡片就和底同色了。所以分层手段整体换成三件叠加：
  *
- * 1. 底色从冷灰 `#F3F4F6` 换成暖米白 `#F6F1EA`：照片多为暖调食物，冷灰底会让图片显得
- *    与界面「两层皮」；暖底把封面拉回同一色温，图片自然成为画面主角。
- * 2. 主色从「鲜亮但压不住白字」的 `#0EA56B`（白字仅 3.18:1）收深为 `#0A8558`：白字 4.66:1（WCAG AA），
- *    实心按钮与徽章文字不再靠字号侥幸过关。鲜亮的 `#12B377` 降级为**装饰色**（图表柱、
- *    渐变高光、聚焦光晕），只在不承担文字对比度要求的位置出现。
- * 3. 「待探访」的暖橙收深为琥珀褐 `#9E570F`（同样 AA 达标），明亮琥珀 `#D9822B` 作装饰档。
- * 4. 新增**纯装饰色**陶土红 [AccentTerracottaLight]：只用于分享卡片、年度回顾这类脱离应用
- *    状态的独立图片版面。**禁止**用作任何状态语义 —— 红=不推荐/危险的分工不容第二个红。
- * 5. 阴影色从冷蓝灰 `#202A3A` 换成暖棕 `#241A10`：冷阴影压在暖底上会发脏，这是上一版
- *    卡片「看起来灰扑扑」的直接原因。
+ * 1. 卡片改用**暖白** `#FBF8F4`——在白底上它是「暖的那一块」，方向与照片色温一致；
+ * 2. 一圈 1px 描边 `#EFE9E1`（[LightOutlineVariant]）把边缘钉住，避免只剩阴影时边缘发闷；
+ * 3. 阴影仍是暖棕偏移（[ShadowAmbient] / [ShadowSpot]）：纯白底上冷灰阴影会立刻显脏，
+ *    这一档比暖米白底时更重要而不是更不重要。
  *
- * 语义色分工不变（AGENTS.md §4 / DESIGN_SYSTEM.md §3）：
- * 绿 = 主操作 / 已用餐 / 推荐；琥珀 = 待探访 / 花费；暖石灰 = 尚可；红 = 不推荐 / 危险。
+ * 其余语义与对比度约定不变：
  *
- * 文字与容器配色均按浅色底验算过正文对比度 ≥ 4.5:1；标 [Vivid] / [Terracotta] 的装饰色
- * 不参与文字对比度，禁止用于小号文字。
+ * - 主色 `#0A8558`（白字 4.66:1，WCAG AA）；鲜亮档 `#12B377` 仅装饰，不承载文字。
+ * - 「待探访」琥珀褐 `#9E570F`（AA 达标），明亮琥珀 `#D9822B` 仅装饰。
+ * - 陶土红 [AccentTerracottaLight] **纯装饰**：只进分享卡与年度回顾这类脱离应用状态的图片版面。
+ * - 语义色分工不变（AGENTS.md §4 / DESIGN_SYSTEM.md §3）：绿 = 主操作/已用餐/推荐；
+ *   琥珀 = 待探访/花费；暖石灰 = 尚可；红 = 不推荐/危险。
+ *
+ * 文字与容器配色均按**纯白底与暖白卡片两处**验算过正文对比度 ≥ 4.5:1；
+ * 标 [Vivid] / [Terracotta] 的装饰色不参与文字对比度，禁止用于小号文字。
  */
 
 // ─────────────────────────────── 浅色 ───────────────────────────────
 
-/** 页面底色。暖米白：让食物照片与界面处在同一色温里。 */
-val LightCanvas = Color(0xFFF6F1EA)
+/** 页面底色。纯白。 */
+val LightCanvas = Color(0xFFFFFFFF)
 
-/** 卡片、表单等浮层表面。纯白在暖米白底上自然浮起。 */
-val LightSurface = Color(0xFFFFFFFF)
+/** 卡片、表单等浮层表面。暖白：在白底上靠色温而不是明度区分，仍读得出「一块纸」。 */
+val LightSurface = Color(0xFFFBF8F4)
 
 /** 次级表面：芯片底槽、输入框未聚焦底色、图片占位。 */
-val LightSurfaceMuted = Color(0xFFF0E7DB)
+val LightSurfaceMuted = Color(0xFFF3EDE5)
 
 /** 更浅一档的分隔/悬停面，用于列表行按下反馈与骨架屏亮部。 */
-val LightSurfaceSubtle = Color(0xFFFBF7F1)
+val LightSurfaceSubtle = Color(0xFFFFFCF8)
 
 val LightTextPrimary = Color(0xFF1D1813)
 val LightTextSecondary = Color(0xFF6E6155)
@@ -87,9 +87,13 @@ val LightOnError = Color(0xFFFFFFFF)
 val LightErrorContainer = Color(0xFFFADFD9)
 val LightOnErrorContainer = Color(0xFF67170F)
 
-/** 描边弱化到近乎不可见：分层交给阴影。 */
+/**
+ * 描边。纯白底上描边**不再是可忽略的装饰**：卡片与底同属白系，边缘主要靠这一档撑住。
+ *
+ * [LightOutlineVariant] 用于卡片 1px 边线与分隔线；[LightOutline] 用于输入框等有意识描边。
+ */
 val LightOutline = Color(0xFF8F8478)
-val LightOutlineVariant = Color(0xFFE7DED2)
+val LightOutlineVariant = Color(0xFFEFE9E1)
 
 // ─────────────────────────────── 深色 ───────────────────────────────
 
@@ -177,8 +181,9 @@ val PrimaryShadowDark = Color(0x664FD39A)
 /**
  * hero 区的暖光渐变（自上而下）。
  *
- * 清单/足迹页顶部那一张「今天吃什么」卡用它：杏色渐隐到表面色，
- * 相当于给页面顶部打一束暖光，而不是让大标题孤立地坐在灰底上。
+ * 清单/足迹页顶部那一张「今天吃什么」卡用它：杏色渐隐到暖白卡片色，
+ * 相当于给页面顶部打一束暖光。底端刻意落在 [LightSurface] 而不是纯白——
+ * 卡片坐在白底上，渐变的终点必须是卡片自己的颜色，否则下边缘会「化」进背景里。
  */
-val HeroGradientLight = listOf(Color(0xFFFBEAD3), Color(0xFFFFFDF9))
+val HeroGradientLight = listOf(Color(0xFFFBEAD3), Color(0xFFFBF8F4))
 val HeroGradientDark = listOf(Color(0xFF2C2318), Color(0xFF1D1A17))

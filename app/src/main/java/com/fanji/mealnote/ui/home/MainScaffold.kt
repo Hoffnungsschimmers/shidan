@@ -80,6 +80,7 @@ import com.fanji.mealnote.ui.components.rememberGlassBackdrop
 import com.fanji.mealnote.ui.components.rememberSelectionHaptic
 import com.fanji.mealnote.ui.components.staggeredEnter
 import com.fanji.mealnote.ui.settings.SettingsScreen
+import com.fanji.mealnote.ui.settings.SettingsSection
 import com.fanji.mealnote.ui.theme.mealTokens
 import com.fanji.mealnote.ui.theme.softShadow
 
@@ -121,6 +122,7 @@ fun MainScaffold(
     onOpenRestaurant: (Long) -> Unit,
     onAddRestaurant: () -> Unit,
     onStartVisit: () -> Unit,
+    onOpenSettingsSection: (SettingsSection) -> Unit,
 ) {
     val backdrop = rememberGlassBackdrop()
     val fluid = isFluidMotion
@@ -159,8 +161,12 @@ fun MainScaffold(
 
                     MainTab.FOOTPRINT -> FootprintScreen(onOpenRestaurant = onOpenRestaurant)
 
-                    // 「我的」是设置内容，作为标签页使用（无返回按钮，底部留白避开导航栏）。
-                    MainTab.MINE -> SettingsScreen(contentBottomPadding = MainContentBottomPadding)
+                    // 「我的」只做分区导航：设置项不再平铺成一长页，
+                    // 当前值以摘要显示在行下方，改值进二级页（返回栈里只多一条）。
+                    MainTab.MINE -> SettingsScreen(
+                        onOpenSection = onOpenSettingsSection,
+                        contentBottomPadding = MainContentBottomPadding,
+                    )
                 }
             }
         }

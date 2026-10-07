@@ -61,7 +61,7 @@ Compose Screen → ViewModel → MealRepository → { MealDao, PhotoStore, Backu
 - 自由文本入库统一 `MealText.normalizeText(limit)`:**按 code point 截断**,禁 `take(n)` / `substring(0,n)`(会切碎 emoji 代理对损坏备份)。
 
 **UI / 视觉**
-- 一切 UI 改动符合 `DESIGN_SYSTEM.md`:视觉方向为**暖食欲 · 图为主**(暖米白底 + 深翠绿主色);语义色分工(绿=主操作/已用餐/推荐、琥珀=待探访/花费、暖石灰=尚可、红=不推荐/危险)、圆角阶梯 10/16/20/26/32dp、页面边距 20dp、弹簧动效(禁线性/缓动;**唯一例外**是无终点的循环型动画:骨架屏扫光、空态呼吸)。状态不可只靠颜色,必须带文字。
+- 一切 UI 改动符合 `DESIGN_SYSTEM.md`:视觉方向为**纯白底 · 暖白浮层 · 图为主**(Canvas `#FFFFFF` + 卡片 `#FBF8F4` + 深翠绿主色;分层靠暖白卡片 + 1px 描边 + 暖棕阴影三件叠加,不再靠底与卡片的色差);语义色分工(绿=主操作/已用餐/推荐、琥珀=待探访/花费、暖石灰=尚可、红=不推荐/危险)、圆角阶梯 10/16/20/26/32dp、页面边距 20dp、弹簧动效(禁线性/缓动;**唯一例外**是无终点的循环型动画:骨架屏扫光、空态呼吸)。状态不可只靠颜色,必须带文字。
 - 动效弹簧一律取自 `MealMotion`(`settle`/`bouncy`/`pop`/`quick`),组件内不得自行写 `spring(...)`。
 - 无障碍硬约定:分段控件 `selectableGroup()`+`selectable(selected)` 配对;`clearAndSetSemantics` 补回 `role`/`onClick`;图表整体描述;动画数字锁定终值播报;`3/9` 写作「第 3 张,共 9 张」。
 - 主按钮用 `heightIn(min=…)` 防大字体裁字;图片**解码尺寸必须有界**(`AsyncImage` 显式指定尺寸,或 `rememberAsyncImagePainter` + 有界外层 Box),否则 Coil 按原图解码,一张 2048px 照片约占 16MB。

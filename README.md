@@ -4,17 +4,17 @@
 
 ## 当前状态
 
-最新版本 **v0.6.0（versionCode 16）**——同时是改名「食单」后的第一版：
-「暖食欲 · 图为主」视觉全域重做，加上账本 CSV 导出、每月预算、清单排序、备份新鲜度、
-WebDAV 连通性检查、重复店名提醒、年度回顾卡片、单店累计入账。上一版 v0.5.1（15）是随机选店
-按评价范围 + 搜索覆盖餐品名；v0.5.0（14）落地记账核心（结构化入账金额，schema v3 → v4）。
+最新版本 **v0.6.1（versionCode 17）**：修掉真机首轮反馈的两处 bug（清单吸顶条滚动发灰、
+足迹切到「统计」后回不去），底色按你的偏好改回**纯白 + 暖白卡片**，「我的」拆成 6 个二级分区页。
+上一版 v0.6.0（16）改名「食单」，含账本 CSV 导出、每月预算、清单排序、备份新鲜度、
+WebDAV 连通性检查、重复店名提醒、年度回顾卡片、单店累计入账与暖食欲视觉全域重做。
 
-> ⚠️ v0.6.0 **只过了编译与 JVM 测试，没有在真机上跑过一次**。
-> 排版、深色模式、大字体裁字、TalkBack、流畅模式降级外观一律未经确认；
-> WebDAV 同步与连通性检查尚未在真实服务器上验证通过（AGENTS §5-3 的发布门槛仍未解锁）。
-> 交付包：`apk/食单-v0.6.0-release.apk`（证书与 v0.5.1 release 逐字一致，可直接覆盖升级、数据保留）
-> 与 `apk/食单-v0.6.0-debug.apk`（与历次 debug 包同 debug 证书）。**debug 与 release 之间跨类型安装会被签名拒绝。**
-> 逐项明细见 `CHANGELOG.md` 0.6.0 节。
+> ⚠️ v0.6.1 **同样只过了编译与 JVM 测试**——它修的正是「只有真机才看得见」的问题，
+> 而修复本身还得你再看一眼：纯白底与暖白卡片的层次感、6 个二级页的返回手感、吸顶条在滚动中的表现。
+> WebDAV 同步与连通性检查仍未在真实服务器上验证通过（AGENTS §5-3 的发布门槛未解锁）。
+> 交付包：`apk/食单-v0.6.1-release.apk`（证书与 v0.5.1 / v0.6.0 release 逐字一致，覆盖安装保数据）
+> 与 `apk/食单-v0.6.1-debug.apk`（与历次 debug 包同 debug 证书）。**debug 与 release 之间跨类型安装会被签名拒绝。**
+> 逐项明细见 `CHANGELOG.md` 0.6.1 节。
 
 **信息架构**（底部三栏）
 
@@ -54,7 +54,7 @@ WebDAV 连通性检查、重复店名提醒、年度回顾卡片、单店累计�
 
 **界面**
 
-- **暖食欲 · 图为主**视觉（继承 MIUIx / HyperOS 的浮层与弹簧语言）：暖米白底、纯白浮层、大圆角、柔和暖棕投影、弹簧动效；封面图承担卡片锚点，缺图退化为「暖光渐变 + 店名首字」；
+- **纯白底 · 暖白浮层 · 图为主**视觉（继承 MIUIx / HyperOS 的浮层与弹簧语言）：纯白页面底、暖白卡片 + 1px 描边 + 柔和暖棕投影、大圆角、弹簧动效；封面图承担卡片锚点，缺图退化为「暖光渐变 + 店名首字」；
 - 底部导航栏、详情页顶栏与操作栏使用 **Liquid Glass** 玻璃材质；
   API 31+ 为真实背景模糊（`GraphicsLayer` + `RenderEffect`），低版本自动降级为拟态玻璃；
 - 全屏照片查看器：左右滑动切换、双击缩放、放大后拖动平移；
@@ -176,15 +176,15 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 
 ## 构建状态
 
-以下为 **2026-10-07 改名与升版后**对当前代码的实测结果：
+以下为 **2026-10-07（v0.6.1）**对当前代码的实测结果：
 
 | 检查项 | 状态 |
 |---|---|
 | `testDebugUnitTest`（`--rerun` 强制实跑） | 28 个套件 / 252 个用例全部通过，0 失败 0 错误 |
 | `scripts/run-unit-tests.ps1` | 同上（从源码发现 28 个测试类，`OK (252 tests)`） |
 | `lintDebug` | 通过，报告 `No issues found` |
-| `assembleDebug` | 通过（versionCode 16，versionName 0.6.0，label 食单）；已交付 `C:\Users\2540\Desktop\mealnote\apk\食单-v0.6.0-debug.apk`（19,146,184 B） |
-| `assembleRelease` | 通过（R8 混淆 + 资源裁剪），`apksigner verify` 退出码 0；已交付 `C:\Users\2540\Desktop\mealnote\apk\食单-v0.6.0-release.apk`（2,127,811 B），证书与 v0.5.1 release 逐字一致（`9cf9cd69…`），可覆盖安装保数据 |
+| `assembleDebug` | 通过（versionCode 17，versionName 0.6.1，label 食单）；已交付 `C:\Users\2540\Desktop\mealnote\apk\食单-v0.6.1-debug.apk` |
+| `assembleRelease` | 通过（R8 混淆 + 资源裁剪），`apksigner verify` 退出码 0；已交付 `C:\Users\2540\Desktop\mealnote\apk\食单-v0.6.1-release.apk`，证书与 v0.5.1/v0.6.0 release 逐字一致，可覆盖安装保数据 |
 
 > 构建能过 ≠ 功能可用：本机无真机/模拟器，**UI 与 WebDAV 远程路径均未经验证**（见 ROADMAP 第七/九节）。
 

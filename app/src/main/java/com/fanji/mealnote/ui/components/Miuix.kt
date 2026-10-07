@@ -122,6 +122,9 @@ fun MiuixCard(
             .softShadow(shape, shadow, tokens.shadowAmbient, tokens.shadowSpot)
             .clip(shape)
             .background(color)
+            // 纯白底上卡片是暖白而非纯白，色差极小；这一圈 1px 边线才是边缘的主要依据，
+            // 只留阴影会在白底上糊成一团没有边界的光晕。
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
             .then(
                 if (onClick != null) {
                     Modifier.clickable(
@@ -361,7 +364,8 @@ fun MiuixChip(
         label = "chipContent",
     )
     val borderColor by animateColorAsState(
-        targetValue = if (selected) accent.copy(alpha = 0.45f) else Color.Transparent,
+        // 同色零不透明度，而不是 Color.Transparent（透明黑）：后者会让中间帧发灰。
+        targetValue = if (selected) accent.copy(alpha = 0.45f) else accent.copy(alpha = 0f),
         animationSpec = MealMotion.quick(),
         label = "chipBorder",
     )
@@ -508,7 +512,7 @@ fun <T> MiuixSegmented(
                         Modifier.background(
                             Brush.verticalGradient(
                                 listOf(
-                                    Color.Transparent,
+                                    selectedAccent.copy(alpha = 0f),
                                     selectedAccent.copy(alpha = 0.18f),
                                 ),
                             ),

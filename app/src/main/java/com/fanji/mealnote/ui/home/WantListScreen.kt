@@ -266,13 +266,23 @@ private fun ListToolbar(
     sortMode: RestaurantSort,
     onSortChange: (RestaurantSort) -> Unit,
 ) {
+    // 端点一律用「同色零不透明度」而不是 Color.Transparent：Transparent 是透明黑，
+    // 从它插值到暖白会途经发灰的中间帧，滚动时吸顶条就变成一块脏灰色。
     val barColor by animateColorAsState(
-        targetValue = if (scrolled) MaterialTheme.colorScheme.background else Color.Transparent,
+        targetValue = if (scrolled) {
+            MaterialTheme.colorScheme.background
+        } else {
+            MaterialTheme.colorScheme.background.copy(alpha = 0f)
+        },
         animationSpec = MealMotion.quick(),
         label = "toolbarBackground",
     )
     val hairline by animateColorAsState(
-        targetValue = if (scrolled) MaterialTheme.colorScheme.outlineVariant else Color.Transparent,
+        targetValue = if (scrolled) {
+            MaterialTheme.colorScheme.outlineVariant
+        } else {
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0f)
+        },
         animationSpec = MealMotion.quick(),
         label = "toolbarHairline",
     )
