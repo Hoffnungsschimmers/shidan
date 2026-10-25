@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -127,6 +128,7 @@ fun MainScaffold(
     val backdrop = rememberGlassBackdrop()
     val fluid = isFluidMotion
     var tab by rememberSaveable { mutableStateOf(MainTab.WANT) }
+    val tabStateHolder = rememberSaveableStateHolder()
     var showEntrySheet by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -153,20 +155,24 @@ fun MainScaffold(
                 },
                 label = "mainTab",
             ) { target ->
-                when (target) {
-                    MainTab.WANT -> WantListScreen(
-                        onOpenRestaurant = onOpenRestaurant,
-                        onAddRestaurant = onAddRestaurant,
-                    )
+                // 只保存各标签的 rememberSaveable（含 LazyList 位置）；业务流仍实时订阅，
+                // 不引入新导航项或 ViewModelStoreOwner。按标签名分区也兼容保存状态恢复。
+                tabStateHolder.SaveableStateProvider(key = target.name) {
+                    when (target) {
+                        MainTab.WANT -> WantListScreen(
+                            onOpenRestaurant = onOpenRestaurant,
+                            onAddRestaurant = onAddRestaurant,
+                        )
 
-                    MainTab.FOOTPRINT -> FootprintScreen(onOpenRestaurant = onOpenRestaurant)
+                        MainTab.FOOTPRINT -> FootprintScreen(onOpenRestaurant = onOpenRestaurant)
 
-                    // 「我的」只做分区导航：设置项不再平铺成一长页，
-                    // 当前值以摘要显示在行下方，改值进二级页（返回栈里只多一条）。
-                    MainTab.MINE -> SettingsScreen(
-                        onOpenSection = onOpenSettingsSection,
-                        contentBottomPadding = MainContentBottomPadding,
-                    )
+                        // 「我的」只做分区导航：设置项不再平铺成一长页，
+                        // 当前值以摘要显示在行下方，改值进二级页（返回栈里只多一条）。
+                        MainTab.MINE -> SettingsScreen(
+                            onOpenSection = onOpenSettingsSection,
+                            contentBottomPadding = MainContentBottomPadding,
+                        )
+                    }
                 }
             }
         }

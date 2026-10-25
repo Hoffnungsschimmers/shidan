@@ -43,8 +43,11 @@ Compose Screen          界面展示与用户事件
 | `ADD_VISIT` | `restaurant/{restaurantId}/visit?copyFrom={copyFrom}` | `restaurantId: Long`、`copyFrom: Long`(默认 `-1`=无来源) | `AddVisitScreen` |
 | `EDIT_RESTAURANT` | `restaurant/{restaurantId}/edit` | `restaurantId: Long` | `EditRestaurantScreen` |
 | `EDIT_VISIT` | `visit/{recordId}/edit` | `recordId: Long` | `EditVisitScreen` |
+| `SETTINGS_SECTION` | `settings/{section}` | `section: String`(`SettingsSection.slug`) | `SettingsSectionScreen` |
 
 参数约定:
+- `settings/{section}` 的 `section` 用枚举里固定的 **slug 字符串**而非枚举名:路由是外部可见的字符串,枚举重命名会静默断链。未知 slug 直接弹回,不留空白页。
+- **设置页共享 ViewModel**:分区页与「我的」的 owner 是同一个 MAIN 回退栈条目(`hiltViewModel(settingsOwner)`),因此长任务进行中离开分区页不会取消协程(SAF 目标文件不会只写半截),分区页导入/清空后父页统计也同步刷新。
 - `copyFrom` 用**哨兵值 `NO_COPY_SOURCE = -1L`** 而非可空 Long(记录 id 恒正,负数不冲突;Navigation 可空 Long 易出错)。`AddVisitScreen` 收到时 `copyFrom.takeIf { it != NO_COPY_SOURCE }`。
 - 构造器函数:`Routes.addRestaurant(nextVisit)`、`restaurantDetail(id)`、`addVisit(id, copyFrom)`、`editRestaurant(id)`、`editVisit(recordId)`。
 
@@ -72,7 +75,7 @@ Compose Screen          界面展示与用户事件
 
 ## 5. 状态管理架构模式(四个表单 ViewModel 共有)
 
-1. **原子状态跃迁防抖**:`updateAndGet` 内同时检查 + 置位 `isSaving`/`isDeleting`,防两次快速点击各起协程写重复数据。
+1. **原子状态跃迁防抖**(`ui/StateTransitions.kt#tryTransition`):把「检查 + 置位」压进一次 CAS(`compareAndSet`),只有真正完成跃迁的调用拿到新状态,已在忙碌或 `transform` 返回 null 的调用拿到 null 并提前返回。早先用 `updateAndGet` 后再判断 `!snapshot.isSaving` 是**反的**——`updateAndGet` 返回的是写入**之后**的状态,守卫永远不生效,两次并发点击会各自写一次库。`transform` 可能因 CAS 重试被重复调用,必须是纯函数。
 2. **SavedStateHandle 持久化**:`init` 中 `distinctUntilChanged` 只持久化用户输入字段(不含加载态/错误),防每键一次 Bundle 写入。
 3. **`restoredFromSavedState` 构造时求值 + 声明在 `init` 之前**(关键不变式):`init` 持久化协程构造期即写 handle,若延后判断会恒 `true`,导致 (a) `onCleared` 回收永不执行→孤儿文件泄漏;(b) 编辑页永远空白(走「保留用户输入」分支覆盖 DB 数据)。这是 v0.3.3 / v0.3.6 两个数据丢失 bug 与「编辑页空白」bug 的共同根因。
 4. **数据由 Room 订阅自动刷新**:删除/编辑保存后详情页无需手动重载(`observeRestaurantWithRecords` + `stateIn(WhileSubscribed(5000))`)。
@@ -99,6 +102,7 @@ com.fanji.mealnote/
 └─ ui/
    ├─ MealNoteApp               NavHost、转场、路由表
    ├─ Formatters                日期/金额/存储量格式化
+   ├─ StateTransitions           `tryTransition`:状态守卫的 CAS 原语
    ├─ theme/                    Color、Theme、Type
    ├─ components/               Miuix、Motion、FluidMotion、Glass、MealComponents、
    │                            FormSections、VerdictSelector、CommonStates、
@@ -107,7 +111,8 @@ com.fanji.mealnote/
    ├─ home/                     MainScaffold、WantList、Footprint、Ledger/Random/Search 逻辑
    ├─ add/ visit/               新建店铺(+DuplicateNameCheck)、选店、用餐表单
    ├─ detail/ edit/             详情(+DetailStats)、编辑店铺、编辑用餐
-   └─ settings/                 SettingsScreen、SettingsViewModel、WebDavSection
+   └─ settings/                 SettingsScreen、SettingsSectionScreen(二级分区页)、
+                                SettingsViewModel、WebDavSection
 ```
 
 详见 `docs/DATA_LAYER.md`(数据层)与 `docs/UI_LAYER.md`(界面层)。

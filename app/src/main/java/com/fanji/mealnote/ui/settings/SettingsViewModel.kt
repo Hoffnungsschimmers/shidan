@@ -21,12 +21,13 @@ import com.fanji.mealnote.data.settings.ThemePreference
 import com.fanji.mealnote.data.webdav.WebDavConfig
 import com.fanji.mealnote.data.webdav.WebDavPreference
 import com.fanji.mealnote.data.webdav.WebDavStore
+import com.fanji.mealnote.ui.tryTransition
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -156,6 +157,27 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 长任务的统一入口：原子地把界面切到忙碌态；已有任务在跑时返回 null。
+     *
+     * 为什么不用 `updateAndGet { if (isBusy) state else state.copy(isBusy = true) }` 再看返回值：
+     * 它返回的是**写入之后**的状态，`isBusy` 恒为 true，据此写的 `if (!snapshot.isBusy) return`
+     * 永远不会生效，两次并发点击会各自启动一次导出/导入。这里改用 [tryTransition]，
+     * 只有真正完成「闲 → 忙」跃迁的调用拿到非空状态，其余并发调用拿到 null 直接返回。
+     *
+     * 顺带清空上一条成功提示与常驻错误：它们描述的是上一次操作，留着会和新任务的进度矛盾。
+     *
+     * @return 写入后的状态；已有长任务在跑时返回 null。
+     */
+    private fun beginBusy(label: String): SettingsUiState? =
+        _uiState.tryTransition { state ->
+            if (state.isBusy) {
+                null
+            } else {
+                state.copy(isBusy = true, busyLabel = label, message = null, errorMessage = null)
+            }
+        }
+
     // ---------------------------------------------------------------- 导出
 
     /**
@@ -165,27 +187,35 @@ class SettingsViewModel @Inject constructor(
      * （SAF 已授予该 URI 的写权限），这也是本项目不申请 `<uses-permission>` 的原因。
      */
     fun exportTo(target: Uri) {
-        val snapshot = _uiState.updateAndGet { state ->
-            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在导出…", message = null, errorMessage = null)
-        }
-        if (!snapshot.isBusy) return
+        if (beginBusy("正在导出…") == null) return
 
         viewModelScope.launch {
-            when (val result = backupStore.export(target)) {
-                is MealResult.Success -> {
-                    val summary = result.value
-                    backupStatePreference.markBackedUp()
-                    _uiState.update {
-                        it.copy(
-                            isBusy = false,
-                            busyLabel = null,
-                            message = "已导出 ${summary.restaurantCount} 家餐厅、${summary.recordCount} 条用餐记录、${summary.photoCount} 张照片",
-                        )
+            try {
+                when (val result = backupStore.export(target)) {
+                    is MealResult.Success -> {
+                        val summary = result.value
+                        backupStatePreference.markBackedUp()
+                        _uiState.update {
+                            it.copy(
+                                isBusy = false,
+                                busyLabel = null,
+                                message = "已导出 ${summary.restaurantCount} 家餐厅、${summary.recordCount} 条用餐记录、${summary.photoCount} 张照片",
+                            )
+                        }
+                    }
+
+                    is MealResult.Failure -> _uiState.update {
+                        it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("导出失败"))
                     }
                 }
-
-                is MealResult.Failure -> _uiState.update {
-                    it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("导出失败"))
+            } catch (e: CancellationException) {
+                // 协程被取消（ViewModel 销毁、进程收尾）不是业务失败：原样抛给协程框架，
+                // 不要在这里写成错误提示。
+                throw e
+            } catch (t: Throwable) {
+                // 兜底：Store 层的意外异常若漏出去，isBusy 会永远停在 true、按钮从此禁用。
+                _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = "操作失败，请重试")
                 }
             }
         }
@@ -198,23 +228,29 @@ class SettingsViewModel @Inject constructor(
      * (只有表头的模板),因此不受 [SettingsUiState.canExport] 的「记录数>0」限制。
      */
     fun exportLedgerCsv(target: Uri) {
-        val snapshot = _uiState.updateAndGet { state ->
-            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在导出账本…", message = null, errorMessage = null)
-        }
-        if (!snapshot.isBusy) return
+        if (beginBusy("正在导出账本…") == null) return
 
         viewModelScope.launch {
-            when (val result = ledgerCsvStore.export(target)) {
-                is MealResult.Success -> _uiState.update {
-                    it.copy(
-                        isBusy = false,
-                        busyLabel = null,
-                        message = "已导出 ${result.value} 条用餐记录为 CSV",
-                    )
-                }
+            try {
+                when (val result = ledgerCsvStore.export(target)) {
+                    is MealResult.Success -> _uiState.update {
+                        it.copy(
+                            isBusy = false,
+                            busyLabel = null,
+                            message = "已导出 ${result.value} 条用餐记录为 CSV",
+                        )
+                    }
 
-                is MealResult.Failure -> _uiState.update {
-                    it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("导出账本失败"))
+                    is MealResult.Failure -> _uiState.update {
+                        it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("导出账本失败"))
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // 兜底：任何意外异常都不能让 isBusy 留在 true，否则导出按钮永久禁用。
+                _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = "操作失败，请重试")
                 }
             }
         }
@@ -232,43 +268,48 @@ class SettingsViewModel @Inject constructor(
 
     fun confirmImport() {
         val uri = _uiState.value.pendingImportUri ?: return
-        val snapshot = _uiState.updateAndGet { state ->
-            if (state.isBusy) state else state.copy(
-                isBusy = true,
-                busyLabel = "正在导入…",
-                pendingImportUri = null,
-                message = null,
-                errorMessage = null,
-            )
-        }
-        if (!snapshot.isBusy) return
+        if (beginBusy("正在导入…") == null) return
+        // 已进入忙碌态才收起确认框：确认的职责已经交给忙碌横幅，
+        // 让它继续盖在进度上方会挡住状态，也容易诱导用户重复确认。
+        _uiState.update { it.copy(pendingImportUri = null) }
 
         viewModelScope.launch {
-            when (val result = backupStore.restore(uri)) {
-                is MealResult.Success -> {
-                    val summary = result.value
-                    val skippedNote = if (summary.skippedPhotos > 0) {
-                        "，${summary.skippedPhotos} 张照片无法读取已跳过"
-                    } else {
-                        ""
+            try {
+                when (val result = backupStore.restore(uri)) {
+                    is MealResult.Success -> {
+                        val summary = result.value
+                        val skippedNote = if (summary.skippedPhotos > 0) {
+                            "，${summary.skippedPhotos} 张照片无法读取已跳过"
+                        } else {
+                            ""
+                        }
+                        _uiState.update {
+                            it.copy(
+                                isBusy = false,
+                                busyLabel = null,
+                                message = "已恢复 ${summary.restaurantCount} 家餐厅、${summary.recordCount} 条用餐记录、${summary.photoCount} 张照片$skippedNote",
+                            )
+                        }
+                        refreshStats()
                     }
-                    _uiState.update {
-                        it.copy(
-                            isBusy = false,
-                            busyLabel = null,
-                            message = "已恢复 ${summary.restaurantCount} 家餐厅、${summary.recordCount} 条用餐记录、${summary.photoCount} 张照片$skippedNote",
-                        )
-                    }
-                    refreshStats()
-                }
 
-                is MealResult.Failure -> {
-                    _uiState.update {
-                        it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("导入失败"))
+                    is MealResult.Failure -> {
+                        _uiState.update {
+                            it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("导入失败"))
+                        }
+                        // 导入失败也可能已改写部分文件，重新统计以免显示失真。
+                        refreshStats()
                     }
-                    // 导入失败也可能已改写部分文件，重新统计以免显示失真。
-                    refreshStats()
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // 兜底：导入中途抛出意外异常时，事务可能已落库也可能未落库，
+                // 因此复位忙碌态后同样重新统计，避免父页继续显示导入前的旧数字。
+                _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = "操作失败，请重试")
+                }
+                refreshStats()
             }
         }
     }
@@ -277,21 +318,28 @@ class SettingsViewModel @Inject constructor(
 
     /** 清理未被引用的孤儿照片。 */
     fun cleanupOrphans() {
-        val snapshot = _uiState.updateAndGet { state ->
-            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在清理…", message = null, errorMessage = null)
-        }
-        if (!snapshot.isBusy) return
+        if (beginBusy("正在清理…") == null) return
 
         viewModelScope.launch {
-            val removed = repository.cleanupOrphanPhotos()
-            _uiState.update {
-                it.copy(
-                    isBusy = false,
-                    busyLabel = null,
-                    message = if (removed == 0) "没有需要清理的文件" else "已清理 $removed 个无用文件",
-                )
+            try {
+                val removed = repository.cleanupOrphanPhotos()
+                _uiState.update {
+                    it.copy(
+                        isBusy = false,
+                        busyLabel = null,
+                        message = if (removed == 0) "没有需要清理的文件" else "已清理 $removed 个无用文件",
+                    )
+                }
+                refreshStats()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // 兜底：清理中途的异常不能让「清理」按钮永久禁用。
+                _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = "操作失败，请重试")
+                }
+                refreshStats()
             }
-            refreshStats()
         }
     }
 
@@ -309,33 +357,37 @@ class SettingsViewModel @Inject constructor(
      * 统一处理，无需另写一份容易与备份逻辑产生分歧的实现。
      */
     fun confirmClearData() {
-        val snapshot = _uiState.updateAndGet { state ->
-            if (state.isBusy) state else state.copy(
-                isBusy = true,
-                busyLabel = "正在清空…",
-                showClearDataDialog = false,
-                message = null,
-                errorMessage = null,
-            )
-        }
-        if (!snapshot.isBusy) return
+        if (beginBusy("正在清空…") == null) return
+        // 进入忙碌态后再收起对话框，避免「点了确认但框还开着」的错觉。
+        _uiState.update { it.copy(showClearDataDialog = false) }
 
         viewModelScope.launch {
-            when (val result = repository.replaceAllData(
-                restaurants = emptyList(),
-                records = emptyList(),
-                photos = emptyList(),
-                resolvedPaths = emptyMap(),
-            )) {
-                is MealResult.Success -> _uiState.update {
-                    it.copy(isBusy = false, busyLabel = null, message = "已清空全部数据")
-                }
+            try {
+                when (val result = repository.replaceAllData(
+                    restaurants = emptyList(),
+                    records = emptyList(),
+                    photos = emptyList(),
+                    resolvedPaths = emptyMap(),
+                )) {
+                    is MealResult.Success -> _uiState.update {
+                        it.copy(isBusy = false, busyLabel = null, message = "已清空全部数据")
+                    }
 
-                is MealResult.Failure -> _uiState.update {
-                    it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("清空失败"))
+                    is MealResult.Failure -> _uiState.update {
+                        it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("清空失败"))
+                    }
                 }
+                refreshStats()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // 兜底：清空是单事务，异常时通常整体回滚；仍复位忙碌态并重新统计，
+                // 让用户看到的是数据库的真实现状而不是一个永远转圈的按钮。
+                _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = "操作失败，请重试")
+                }
+                refreshStats()
             }
-            refreshStats()
         }
     }
 
@@ -352,15 +404,21 @@ class SettingsViewModel @Inject constructor(
      * 用户可直接把分享出去的文本发给开发者定位问题。
      */
     fun shareLog() {
-        val snapshot = _uiState.updateAndGet { state ->
-            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在准备日志…", message = null, errorMessage = null)
-        }
-        if (!snapshot.isBusy) return
+        if (beginBusy("正在准备日志…") == null) return
 
         viewModelScope.launch {
-            val text = appLog.exportText()
-            _uiState.update {
-                it.copy(isBusy = false, busyLabel = null, pendingLogText = text)
+            try {
+                val text = appLog.exportText()
+                _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, pendingLogText = text)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // 兜底：读日志失败也要复位忙碌态，否则整页设置按钮都会被禁用。
+                _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = "操作失败，请重试")
+                }
             }
         }
     }
@@ -381,19 +439,25 @@ class SettingsViewModel @Inject constructor(
 
     /** 测试 WebDAV 连通性(不改动数据)。成功给绿色提示,失败给常驻错误。 */
     fun testWebDav() {
-        val snapshot = _uiState.updateAndGet { state ->
-            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在测试连接…", message = null, errorMessage = null)
-        }
-        if (!snapshot.isBusy) return
+        if (beginBusy("正在测试连接…") == null) return
 
         viewModelScope.launch {
-            when (val result = webDavStore.testConnection()) {
-                is MealResult.Success -> _uiState.update {
-                    it.copy(isBusy = false, busyLabel = null, message = result.value)
-                }
+            try {
+                when (val result = webDavStore.testConnection()) {
+                    is MealResult.Success -> _uiState.update {
+                        it.copy(isBusy = false, busyLabel = null, message = result.value)
+                    }
 
-                is MealResult.Failure -> _uiState.update {
-                    it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("连接测试失败"))
+                    is MealResult.Failure -> _uiState.update {
+                        it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("连接测试失败"))
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // 兜底：网络层的意外异常（证书、套接字库等）不能把按钮永久锁死。
+                _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = "操作失败，请重试")
                 }
             }
         }
@@ -401,27 +465,33 @@ class SettingsViewModel @Inject constructor(
 
     /** 上传当前全部数据到 WebDAV（覆盖远端同名文件）。 */
     fun uploadToWebDav() {
-        val snapshot = _uiState.updateAndGet { state ->
-            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在上传…", message = null, errorMessage = null)
-        }
-        if (!snapshot.isBusy) return
+        if (beginBusy("正在上传…") == null) return
 
         viewModelScope.launch {
-            when (val result = webDavStore.upload()) {
-                is MealResult.Success -> {
-                    val summary = result.value
-                    backupStatePreference.markBackedUp()
-                    _uiState.update {
-                        it.copy(
-                            isBusy = false,
-                            busyLabel = null,
-                            message = "已上传 ${summary.restaurantCount} 家餐厅、${summary.recordCount} 条用餐记录、${summary.photoCount} 张照片",
-                        )
+            try {
+                when (val result = webDavStore.upload()) {
+                    is MealResult.Success -> {
+                        val summary = result.value
+                        backupStatePreference.markBackedUp()
+                        _uiState.update {
+                            it.copy(
+                                isBusy = false,
+                                busyLabel = null,
+                                message = "已上传 ${summary.restaurantCount} 家餐厅、${summary.recordCount} 条用餐记录、${summary.photoCount} 张照片",
+                            )
+                        }
+                    }
+
+                    is MealResult.Failure -> _uiState.update {
+                        it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("上传失败"))
                     }
                 }
-
-                is MealResult.Failure -> _uiState.update {
-                    it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("上传失败"))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // 兜底：上传中途断网或套接字异常可能绕过 MealResult，必须复位忙碌态。
+                _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = "操作失败，请重试")
                 }
             }
         }
@@ -435,31 +505,38 @@ class SettingsViewModel @Inject constructor(
      * 本方法只执行下载与恢复。
      */
     fun downloadFromWebDav() {
-        val snapshot = _uiState.updateAndGet { state ->
-            if (state.isBusy) state else state.copy(isBusy = true, busyLabel = "正在下载…", message = null, errorMessage = null)
-        }
-        if (!snapshot.isBusy) return
+        if (beginBusy("正在下载…") == null) return
 
         viewModelScope.launch {
-            when (val result = webDavStore.downloadAndRestore()) {
-                is MealResult.Success -> {
-                    val summary = result.value
-                    _uiState.update {
-                        it.copy(
-                            isBusy = false,
-                            busyLabel = null,
-                            message = "已恢复 ${summary.restaurantCount} 家餐厅、${summary.recordCount} 条用餐记录、${summary.photoCount} 张照片",
-                        )
+            try {
+                when (val result = webDavStore.downloadAndRestore()) {
+                    is MealResult.Success -> {
+                        val summary = result.value
+                        _uiState.update {
+                            it.copy(
+                                isBusy = false,
+                                busyLabel = null,
+                                message = "已恢复 ${summary.restaurantCount} 家餐厅、${summary.recordCount} 条用餐记录、${summary.photoCount} 张照片",
+                            )
+                        }
+                        refreshStats()
                     }
-                    refreshStats()
-                }
 
-                is MealResult.Failure -> {
-                    _uiState.update {
-                        it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("下载失败"))
+                    is MealResult.Failure -> {
+                        _uiState.update {
+                            it.copy(isBusy = false, busyLabel = null, errorMessage = result.error.toMessage("下载失败"))
+                        }
+                        refreshStats()
                     }
-                    refreshStats()
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // 兜底：下载/恢复中途的意外异常可能留下部分新数据，复位后重新统计。
+                _uiState.update {
+                    it.copy(isBusy = false, busyLabel = null, errorMessage = "操作失败，请重试")
+                }
+                refreshStats()
             }
         }
     }

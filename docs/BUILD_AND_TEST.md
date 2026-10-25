@@ -40,13 +40,13 @@ C:\Users\2540\mealnote-workspace  ->  C:\Users\2540\Desktop\mealnote
 ```
 只装了 JDK 21 时会报 `Cannot find a Java installation ... languageVersion=17`,上述参数即解法。
 
-> 注:`PROJECT_OVERVIEW.md` 称英文联接「已冗余可删」,但 README 仍建议使用。以 README 为准继续使用较稳妥。
+> 注:英文目录联接**仍在用**,不要当冗余删掉:`AGENTS.md` §3 的构建命令以 `C:\Users\2540\mealnote-workspace` 为入口,2026-10-20 实测可用。中文路径直跑会触发部分任务的乱码/类路径问题。
 
 ## 4. 已知环境问题(与被测代码无关)
 
 | 问题 | 处理 |
 |---|---|
-| `testDebugUnitTest` 曾报全体测试类 `ClassNotFoundException at initializationError` | **2026-10-06 复测未复现**:`--rerun` 强制执行 28 套件 / 252 例全过。历史记录的原因是 AGP 的 `bundleDebugClassesToRuntimeJar` 产物(`.../runtime_app_classes_jar/debug/.../classes.jar`)未进测试工作进程运行时类路径。若复发,改用 JDK 直跑(第 5 节)或 `scripts/run-unit-tests.ps1` |
+| `testDebugUnitTest` 曾报全体测试类 `ClassNotFoundException at initializationError` | **2026-10-06 复测未复现**(28 套件 / 252 例全过),**2026-10-20 打磨轮再次实跑 29 套件 / 266 例全过**。历史记录的原因是 AGP 的 `bundleDebugClassesToRuntimeJar` 产物(`.../runtime_app_classes_jar/debug/.../classes.jar`)未进测试工作进程运行时类路径。若复发,改用 JDK 直跑(第 5 节)或 `scripts/run-unit-tests.ps1` |
 | 找不到 JDK 17 工具链 | 显式 `-Porg.gradle.java.installations.paths="D:/env/jdk-17.0.16+8"` |
 | `build-cache-1\*.part 拒绝访问` | 追加 `--no-build-cache`,必要时删 `~/.gradle/caches/build-cache-1` |
 | R8 报 `classes.dex 另一个程序正在使用此文件` | `.\gradlew.bat --stop` → 删 `app/build/intermediates/dex/release/` → 重建 |
@@ -55,25 +55,25 @@ C:\Users\2540\mealnote-workspace  ->  C:\Users\2540\Desktop\mealnote
 
 Lint 策略(`app/build.gradle.kts`):禁用 `GradleDependency`/`AndroidGradlePluginVersion`/`NewerVersionAvailable`/`ObsoleteSdkInt`;`abortOnError = true`、`warningsAsErrors = false`、`checkDependencies = true`。
 
-## 5. JDK 直跑单元测试(本机唯一可用的自动验证)
+## 5. JDK 直跑单元测试(备用路径;日常用 `testDebugUnitTest` 或 `scripts/run-unit-tests.ps1`)
 
 ```bash
 "$JDK17/bin/java.exe" \
   -cp "app/build/intermediates/classes/debugUnitTest/transformDebugUnitTestClassesWithAsm/dirs;\
 app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntimeJar/classes.jar;\
-<junit-4.13.2.jar>;<kotlin-stdlib.jar>;<hamcrest-core-1.3.jar>" \
+<junit-4.13.2.jar>;<kotlin-stdlib.jar>;<hamcrest-core-1.3.jar>;<kotlinx-coroutines-core-jvm.jar>" \
   org.junit.runner.JUnitCore <测试类全限定名...>
 ```
 依赖 jar 位于 `~/.gradle/caches/modules-2/files-2.1/`。**优先用 `scripts/run-unit-tests.ps1`**,
 它不需要维护任何类清单;只有走上面这条手工命令时才需要同步 README「已知环境问题」里的类清单(本项目已三次踩此坑)。
 
+协程原语(`MutableStateFlow`)来自 `kotlinx-coroutines-core-jvm`,不在 app 的 runtime jar 里,直跑必须显式带上。
+脚本按 JDK 安装目录的 `release` 文件校验 `JAVA_VERSION=17`:本机 `JAVA_HOME` 指向 JDK 21 时,它不会把 21 当成 17
+传给 Gradle(2026-10-20 实测的失败形态:Cannot find a Java installation ... languageVersion=17),而是回退到 `D:\env\jdk-17*`。
+
 ## 6. 测试清单(app/src/test,JVM 单元)
 
-当前 **28 个测试套件、252 例**(计数以 `grep -rc "@Test" app/src/test` 为准,下表逐类清单同步维护;
-新增/删除测试类必须同步本表)。首选跑法是 **`scripts/run-unit-tests.ps1`**——它从
-`app/src/test/java` 自动发现测试类,**不存在类清单,也就不可能漂移**;下文的手工 JUnitCore
-命令是备用路径,用它才需要手工同步清单。`testDebugUnitTest` 可在英文联接目录跑通,
-早先记录的 `ClassNotFoundException` 未再复现,JDK 直跑作为备用。测试类:
+当前 **35 个测试套件、354 例**(计数以 `scripts/run-unit-tests.ps1` 从源码发现的结果为准;`grep -rc "@Test" app/src/test` 可复核)。首选跑法是 `scripts/run-unit-tests.ps1`——它从 `app/src/test/java` 自动发现测试类,**不存在类清单,也就不可能漂移**;`testDebugUnitTest` 可在英文联接目录跑通,早先记录的 `ClassNotFoundException` 未再复现,JDK 直跑是备用路径,用它才需要手工同步清单。下表是**阅读用**索引,新增/删除测试类时顺手更新即可,不作硬性约定。测试类:
 
 | 测试类 | 覆盖 |
 |---|---|
@@ -82,15 +82,18 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 | `data.local.ConvertersTest` | 枚举 ↔ 字符串转换、未知值容错 |
 | `data.AmountParsingTest` | 金额解析(人均/桌价/千分位/识别不出返回 null) |
 | `data.backup.BackupEntryNameSafetyTest` | 备份条目名路径穿越防护 |
+| `data.backup.RestoreExecutorTest` | 生产恢复执行器的复制失败/取消、提交前后失败与引用安全回收（21例，依赖替身+真实临时文件） |
 | `data.export.CsvExportSafetyTest` | 账本 CSV 转义/BOM/emoji 保真 |
 | `data.settings.BackupFreshnessTest` | 备份新鲜度文案:从未/今天/昨天/N 天前/时钟回拨兜底 |
 | `data.settings.BudgetPreferenceParseTest` | 预算元→分解析/清除/封顶 |
 | `data.webdav.WebDavProbeTest` | WebDAV 连通性检查状态码归类 |
 | `data.webdav.WebDavUrlSafetyTest` | WebDAV URL 安全 / 凭据脱敏 |
 | `ui.FormattersTest` | 日期/金额/存储量格式化 |
+| `ui.MealDatesTest` | DatePicker UTC 自然日 ↔ 本地业务日、跨月/年/闰日/DST（8例） |
+| `ui.StateTransitionsTest` | `tryTransition` 的 CAS 语义(含多线程「只有一个赢家」) |
 | `ui.add.DuplicateNameCheckTest` | 重复店名归一化与命中 |
 | `ui.detail.DetailStatsTest` | 详情页「累计入账」:求和、null≠0、跳过未记账 |
-| `ui.home.HomeFilterTest` | 清单筛选/搜索 |
+| `ui.home.HomeFilterTest` | 清单筛选/搜索、命中摘要、优先级/清空/数据变化/emoji（28例） |
 | `ui.home.RestaurantSortTest` | 清单排序(最近更新/添加/名称,稳定兜底) |
 | `ui.home.FootprintAggregationTest` | 足迹统计聚合(时区/跨年) |
 | `ui.home.FootprintSearchAndMonthTest` | 足迹搜索命中 / 按月入账合计 |
@@ -104,16 +107,36 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 | `ui.home.YearReviewTest` | 年度回顾(最常去/评价分布/ledger 优先) |
 | `ui.home.RandomScopeFilterTest` | 随机选店候选池过滤 |
 | `ui.edit.ReclaimableFormPhotosTest` | 表单照片回收(只回收本次导入未选中) |
-| `ui.visit.VisitPrefillTest` | 「照上次再来一份」预填(反射锁定字段集合) |
+| `ui.edit.EditRestaurantTransitionsTest` | 生产保存/换封面/移除/导入 CAS 顺序与竞争、保存快照文件保护（12例；非完整ViewModel测试） |
+| `ui.edit.EditVisitLoadingTest` | 生产加载接缝：NULL/已有金额保留、显式自动、恢复草稿（4例） |
+| `ui.visit.VisitPrefillTest` | 快记仅餐品/参考花费、迟到预填、最近候选、emoji（13例） |
+| `ui.visit.VisitFormLogicTest` | 明确采用参考花费、多人人均换算、部分导入/容量反馈与金额摘要（11例） |
+| `ui.visit.VisitPhotoTransitionsTest` | 生产用餐图片 CAS 接缝：提交/导入/加载互斥、容量/重复回调/原图保护、引用查询后实时保护（10例；非完整VM或真实PhotoStore测试） |
 
-androidTest:`data.local.AppDatabaseMigrationTest`(仪器测试,**从未运行**,需真机/模拟器)。
+androidTest:`data.local.AppDatabaseMigrationTest`：**6 例**，覆盖 1→2、2→3、3→4、1→3、1→4、2→4。样本含餐厅、记录、照片，检查关系、枚举、时间/文本、已有封面/花费及新增 NULL/1 默认值；全部调用生产 Migration，**尚未在设备运行**。
+
+2026-10-22 补齐 `androidTest.assets` → `app/schemas`，仅进入测试 APK；`ksp room.schemaLocation` 只负责导出，不能替代资源接线。无设备时先编译并校验资产：
+```powershell
+.\gradlew.bat -p C:\Users\2540\mealnote-workspace assembleDebugAndroidTest `
+  "-Porg.gradle.java.installations.paths=D:\env\jdk-17.0.16+8"
+.\scripts\check-migration-assets.ps1
+```
+脚本检查每份历史 JSON 在测试 APK 中恰好出现一次，并比对 SHA-256。检查失败不会被当作仪器测试通过；接设备后再跑：
+```powershell
+.\gradlew.bat -p C:\Users\2540\mealnote-workspace connectedDebugAndroidTest `
+  "-Porg.gradle.java.installations.paths=D:\env\jdk-17.0.16+8" `
+  "-Pandroid.testInstrumentationRunnerArguments.class=com.fanji.mealnote.data.local.AppDatabaseMigrationTest"
+```
+使用测试设备且不要卸载用户真实数据。测试操作独立的 `migration-test` 数据库；覆盖不包括真实照片文件读写和旧版 APK 覆盖安装。
+
+历史例外：1→2 为封面列添加 `DEFAULT ''`，而 v2 起新建 schema 未声明 SQL 默认值。Room 2.8.4 容忍实体未声明默认值时的差异；本轮用 `PRAGMA table_info` 显式断言已知封面差异及 priceText/amount/personCount 默认值，不宣称所有历史路径与全新建库严格等价，也不修改历史 schema。
 
 ## 7. 测试策略(约定)
 
 - 纯逻辑抽成**不读时钟/时区的顶层函数**,`today`/`zone` 作参数(范例 `FootprintAggregation.kt`)。
 - **把设计决策锁进测试**(如「花费全识别不出返回 null 而非 0」「排行榜同次数按 id 升序」)。
 - 分支逻辑一律抽成 `internal` 顶层纯函数,测试直接调它——**不要在测试里照抄一份逻辑**(`HomeFilterTest` 曾因照抄导致「改了生产代码测试照样绿」,已抽到 `ListSearch.kt` 修掉)。
-- 零覆盖缺口:`MealRepository` 与全部 ViewModel(需 Room 测试环境 + 协程调度器,Repository 是具体类需先抽接口)。
+- 直接调用链覆盖缺口:`MealRepository` 与完整 ViewModel 生命周期。2026-10-22 新增的封面状态跃迁与恢复执行器已直接调用生产逻辑，但依赖仍为测试替身，不能算完整 Android Room/SAF/PhotoStore 集成覆盖。Repository 可直接用真实 Room + 临时文件做集成测试，不以先抽接口或整体重构为前提；ViewModel 的可控暂停/失败测试按需增加窄依赖接缝，使用已有协程测试调度器。纯函数/CAS 测试不代表完整保存与文件生命周期已验证。
 
 ## 8. 发布门槛
 

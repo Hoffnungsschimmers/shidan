@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -38,8 +39,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fanji.mealnote.ui.businessMillisToPickerUtcMillis
 import com.fanji.mealnote.ui.components.FormBottomGap
-import com.fanji.mealnote.ui.components.FormErrorLine
+import com.fanji.mealnote.ui.components.FormErrorBanner
 import com.fanji.mealnote.ui.components.LoadingBlock
 import com.fanji.mealnote.ui.components.MealDateRow
 import com.fanji.mealnote.ui.components.MealPhotoSection
@@ -54,7 +56,9 @@ import com.fanji.mealnote.ui.components.SectionHeader
 import com.fanji.mealnote.ui.components.VerdictSelector
 import com.fanji.mealnote.ui.components.rememberGalleryPicker
 import com.fanji.mealnote.ui.components.rememberPhotoViewerState
+import com.fanji.mealnote.ui.pickerUtcMillisToBusinessMillis
 import java.io.File
+import java.time.ZoneId
 
 /** 编辑一条已有的用餐记录。字段与新增页一致，额外处理加载态与「记录已被删除」。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -105,7 +109,8 @@ fun EditVisitScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding(),
+            .statusBarsPadding()
+            .imePadding(),
     ) {
         MiuixTopBar(
             title = "编辑用餐记录",
@@ -126,7 +131,7 @@ fun EditVisitScreen(
 
             else -> {
                 LazyColumn(
-                    modifier = Modifier.weight(1f).imePadding(),
+                    modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(22.dp),
                 ) {
@@ -183,7 +188,7 @@ fun EditVisitScreen(
                             photoPaths = uiState.photoPaths,
                             photoDescription = "用餐照片（选填）",
                             isImporting = uiState.isImportingPhotos,
-                            canAddPhoto = uiState.canAddPhoto,
+                            canAddPhoto = uiState.canSave && uiState.canAddPhoto,
                             onGallery = { galleryPicker.launch() },
                             onCamera = {
                                 val (file, uri) = viewModel.createCameraTarget()
@@ -229,11 +234,14 @@ fun EditVisitScreen(
                         }
                     }
 
-                    item { FormErrorLine(message = uiState.errorMessage) }
-
                     item { FormBottomGap() }
                 }
 
+                FormErrorBanner(
+                    message = uiState.errorMessage,
+                    onDismiss = viewModel::dismissError,
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                )
                 MiuixButton(
                     label = "保存修改",
                     onClick = viewModel::save,
@@ -250,12 +258,17 @@ fun EditVisitScreen(
     }
 
     if (showDatePicker) {
-        val state = rememberDatePickerState(initialSelectedDateMillis = uiState.dateMillis)
+        val zone = remember { ZoneId.systemDefault() }
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = businessMillisToPickerUtcMillis(uiState.dateMillis, zone),
+        )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    state.selectedDateMillis?.let(viewModel::onDateChange)
+                    state.selectedDateMillis?.let {
+                        viewModel.onDateChange(pickerUtcMillisToBusinessMillis(it, zone))
+                    }
                     showDatePicker = false
                 }) { Text("确定") }
             },

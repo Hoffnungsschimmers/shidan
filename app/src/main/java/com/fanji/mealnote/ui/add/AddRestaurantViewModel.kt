@@ -8,8 +8,12 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.PhotoStore
+import com.fanji.mealnote.data.SaveKind
+import com.fanji.mealnote.data.toImportMessage
+import com.fanji.mealnote.data.toSaveMessage
 import com.fanji.mealnote.data.local.RestaurantEntity
 import com.fanji.mealnote.data.log.AppLog
+import com.fanji.mealnote.ui.tryTransition
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,7 +24,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
@@ -139,35 +142,62 @@ class AddRestaurantViewModel @Inject constructor(
         _uiState.update { it.copy(address = value, errorMessage = null) }
 
     /**
+     * 原子地占用「图片处理中」通道（[AddRestaurantUiState.isImportingPhotos]）。
+     *
+     * 相册导入与相机结果都会整体替换 [AddRestaurantUiState.photoPaths] 并删除被替换的文件，
+     * 两者必须互斥。早先版本在协程内部才置位，两个结果可以交错完成：后完成的一方用旧快照
+     * 覆盖新状态，还会把对方刚选中的文件当成「被替换的旧图」删掉。
+     *
+     * 这里把「判断」与「置位」压进一次 CAS：返回 true 表示本次拿到了处理权；
+     * false 表示已有导入/拍照在收尾，调用方应丢弃本次结果。复位统一在 finally 里做，
+     * 保证文件回收也落在临界区内，不会被下一次操作抢先。
+     */
+    private fun claimPhotoPipeline(): Boolean =
+        _uiState.tryTransition { state ->
+            if (state.isImportingPhotos) null
+            else state.copy(isImportingPhotos = true, errorMessage = null)
+        } != null
+
+    /**
      * 导入相册选择结果。封面只保留一张，新图替换旧图时回收旧文件。
+     *
+     * 占用通道必须在**启动协程之前**完成（见 [claimPhotoPipeline]）：导入是异步的，
+     * 置位晚于启动就会出现上面描述的并发交错；已在导入中则直接丢弃本次结果。
      *
      * 注意删除必须发生在状态更新**之后**（把 IO 移出 `update` lambda），
      * 且不能读取 `update` lambda 的参数做删除：该 lambda 可能被重复执行，
-     * 在其中做磁盘 IO 会阻塞主线程并导致同一文件被删除多次（见 [onCameraPhoto]）。
+     * 在其中做磁盘 IO 会阻塞主线程并导致同一文件被删除多次。
      */
     fun onPhotosPicked(uris: List<Uri>) {
         if (uris.isEmpty()) return
+        if (!claimPhotoPipeline()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isImportingPhotos = true, errorMessage = null) }
-            val (imported, failure) = photoStore.importUrisWithReason(uris.take(1))
-            val newCover = imported.lastOrNull()
-            val obsolete = _uiState.value.photoPaths.filterNot { it == newCover }
-            _uiState.update { state ->
-                if (newCover == null) {
-                    state.copy(isImportingPhotos = false, errorMessage = failure.toImportMessage())
+            try {
+                val (imported, failure) = photoStore.importUrisWithReason(uris.take(1))
+                val newCover = imported.lastOrNull()
+                // 导入失败时并没有发生「替换」：表单里现有的封面仍被界面与随后的保存引用，
+                // 绝不能进入回收集合（否则会删掉文件、状态却仍指向它，保存后得到破图）。
+                val obsolete = if (newCover == null) {
+                    emptyList()
                 } else {
-                    state.copy(
-                        photoPaths = listOf(newCover),
-                        isImportingPhotos = false,
-                        errorMessage = null,
-                    )
+                    _uiState.value.photoPaths.filterNot { it == newCover }
                 }
-            }
-            if (newCover == null) {
-                appLog.warn("cover", "import failed failure=$failure count=${uris.size}")
-            }
-            if (obsolete.isNotEmpty()) {
-                photoStore.deleteOwnedPhotos(obsolete)
+                _uiState.update { state ->
+                    if (newCover == null) {
+                        state.copy(errorMessage = failure.toImportMessage())
+                    } else {
+                        state.copy(photoPaths = listOf(newCover), errorMessage = null)
+                    }
+                }
+                if (newCover == null) {
+                    appLog.warn("cover", "import failed failure=$failure count=${uris.size}")
+                }
+                if (obsolete.isNotEmpty()) {
+                    photoStore.deleteOwnedPhotos(obsolete)
+                }
+            } finally {
+                // 无论成功、失败还是异常，都必须释放通道，否则保存会一直被拒绝。
+                _uiState.update { it.copy(isImportingPhotos = false) }
             }
         }
     }
@@ -178,14 +208,39 @@ class AddRestaurantViewModel @Inject constructor(
     /**
      * 相机拍摄成功，将该文件设为封面，并回收此前已选中的其他图片。
      *
+     * 与相册导入共用同一条通道（[claimPhotoPipeline]）：拍照结果同样要在启动协程前原子占位，
+     * 否则可能与正在进行的导入交错，互相覆盖 [AddRestaurantUiState.photoPaths]、误删对方的文件。
+     * 通道被占用（或图片列表已被并发修改）时本次拍摄结果无法保留，按取消处理删除目标文件
+     * ——[PhotoStore.createCameraTarget] 要求回调必须二选一「保留或删除」，不能留下孤儿文件。
+     *
      * 文件删除是磁盘 IO，必须放入协程：早期版本在 `update` 的 lambda 内直接调用会阻塞
      * 主线程，且 lambda 可能被重复执行导致同一文件被删除多次。
      */
     fun onCameraPhoto(file: File) {
-        val previous = _uiState.value.photoPaths
-        _uiState.update { it.copy(photoPaths = listOf(file.absolutePath), errorMessage = null) }
+        // 先读快照、再在跃迁里比对，等价于一次 CAS：只有「通道空闲且图片列表没被别人改过」
+        // 才接受拍摄结果。跃迁返回的是写入后的状态，旧路径必须从快照里取。
+        val snapshot = _uiState.value
+        val claimed = _uiState.tryTransition { state ->
+            if (state.isImportingPhotos || state.photoPaths != snapshot.photoPaths) {
+                null
+            } else {
+                state.copy(
+                    photoPaths = listOf(file.absolutePath),
+                    isImportingPhotos = true,
+                    errorMessage = null,
+                )
+            }
+        }
+        if (claimed == null) {
+            onCameraCancelled(file)
+            return
+        }
         viewModelScope.launch {
-            photoStore.deleteOwnedPhotos(previous.filterNot { it == file.absolutePath })
+            try {
+                photoStore.deleteOwnedPhotos(snapshot.photoPaths.filterNot { it == file.absolutePath })
+            } finally {
+                _uiState.update { it.copy(isImportingPhotos = false) }
+            }
         }
     }
 
@@ -194,37 +249,52 @@ class AddRestaurantViewModel @Inject constructor(
         viewModelScope.launch { photoStore.deleteOwnedPhoto(file.absolutePath) }
     }
 
+    /**
+     * 移除表单里的封面，并在安全时回收对应文件。
+     *
+     * 「从列表移除」与「是否正在保存」通过同一次 CAS 取得一致：若保存先一步置位，
+     * 这里拿到的状态 [AddRestaurantUiState.isSaving] 为 true，只移除不删文件——
+     * 保存可能已经提交，删掉会让刚写入的记录指向不存在的图片（最坏留个孤儿，
+     * 可由清理入口回收）；若移除先完成，保存随后拿到的快照里已没有这张图，删除才是安全的。
+     */
     fun removePhoto(index: Int) {
-        val path = _uiState.value.photoPaths.getOrNull(index) ?: return
-        _uiState.update { state ->
-            state.copy(photoPaths = state.photoPaths.filterIndexed { i, _ -> i != index })
-        }
-        viewModelScope.launch { photoStore.deleteOwnedPhoto(path) }
+        val snapshot = _uiState.value
+        val removed = snapshot.photoPaths.getOrNull(index) ?: return
+        val state = _uiState.tryTransition { current ->
+            if (current.photoPaths.getOrNull(index) != removed) {
+                null
+            } else {
+                current.copy(photoPaths = current.photoPaths.filterIndexed { i, _ -> i != index })
+            }
+        } ?: return
+        // 已保存成功时同理：界面正在返回上一页，文件已被数据库引用。
+        if (state.isSaving || state.savedId != null) return
+        viewModelScope.launch { photoStore.deleteOwnedPhoto(removed) }
     }
 
     /**
      * 提交保存。
      *
-     * 防抖采用**原子化的状态跃迁**：先用 [MutableStateFlow.update] 把 `isSaving` 置位，
-     * 再在同一个 lambda 内判断是否已经被其他调用抢先置位。这样两次快速点击只会进入一次
-     * 保存流程（早期版本先读 `value` 再 `launch`，两次点击都可能在置位前读到 false，
-     * 从而产生重复餐厅）。
+     * 防抖采用**原子状态跃迁**（[tryTransition]）：把「是否已在保存 / 正在导入图片 / 已保存」
+     * 的判断与 `isSaving` 的置位压进同一次 CAS。早先版本用 `updateAndGet` 后再判断
+     * `!snapshot.isSaving`，但 `updateAndGet` 返回的是**写入后**的状态——重复点击时
+     * `snapshot.isSaving` 恒为 true，守卫永远不会返回，两次点击会各自写一次数据库。
      *
-     * 表单数据在置位之后重新读取，确保保存的是最新输入，而不是点击瞬间的快照。
+     * 拿到 null 表示状态机已忙碌，本次点击直接丢弃；名称为空时跃迁只翻起
+     * [AddRestaurantUiState.showNameError] 并返回，同样不进入保存。
+     *
+     * 保存使用的是跃迁成功后那一刻的状态快照：点击之后用户若继续修改表单，
+     * 改动不会混入已经提交的这一笔。
      */
     fun save() {
-        val snapshot = _uiState.updateAndGet { state ->
-            if (state.isSaving || state.isImportingPhotos || state.savedId != null) {
-                // 已在进行中：原样返回，外层通过 savedId/isSaving 判定为重复提交。
-                state
-            } else if (state.name.isBlank()) {
-                state.copy(showNameError = true)
-            } else {
-                state.copy(isSaving = true, errorMessage = null)
+        val snapshot = _uiState.tryTransition { state ->
+            when {
+                state.savedId != null || state.isSaving || state.isImportingPhotos -> null
+                state.name.isBlank() -> state.copy(showNameError = true)
+                else -> state.copy(isSaving = true, errorMessage = null)
             }
-        }
-        if (!snapshot.isSaving || snapshot.showNameError || snapshot.savedId != null) return
-        if (snapshot.name.isBlank()) return
+        } ?: return
+        if (snapshot.showNameError) return
 
         viewModelScope.launch {
             when (val result = repository.addRestaurant(
@@ -237,7 +307,7 @@ class AddRestaurantViewModel @Inject constructor(
 
                 is MealResult.Failure ->
                     _uiState.update {
-                        it.copy(isSaving = false, errorMessage = result.error.toSaveMessage())
+                        it.copy(isSaving = false, errorMessage = result.error.toSaveMessage(SaveKind.RESTAURANT))
                     }
             }
         }
@@ -246,23 +316,19 @@ class AddRestaurantViewModel @Inject constructor(
     /**
      * 页面销毁时回收未提交的图片。
      *
-     * 两种必须跳过清理的情况：
+     * 三种必须跳过清理的情况：
      * 1. 保存已成功（[AddRestaurantUiState.savedId] 非空）—— 文件已被数据库引用；
-     * 2. 进程重建（[wasRestoredFromSavedState]）—— 文件对应的是用户仍在编辑的表单，
+     * 2. 保存已开始但结果尚未回写（[AddRestaurantUiState.isSaving]）—— 事务可能已经提交，
+     *    此时删除会让刚写入的记录指向不存在的图片；最坏只是留下孤儿，可由清理入口回收；
+     * 3. 进程重建（[restoredFromSavedState]）—— 文件对应的是用户仍在编辑的表单，
      *    若此时删除，重建后的界面会显示破图，用户重新保存时会写入失效路径。
      */
     override fun onCleared() {
-        if (_uiState.value.savedId == null && !restoredFromSavedState) {
-            photoStore.deleteOwnedPhotos(_uiState.value.photoPaths)
+        val state = _uiState.value
+        if (!state.isSaving && state.savedId == null && !restoredFromSavedState) {
+            photoStore.deleteOwnedPhotos(state.photoPaths)
         }
         super.onCleared()
-    }
-
-    private fun MealError.toSaveMessage(): String = when (this) {
-        is MealError.InvalidInput -> reason
-        MealError.StorageFull -> "存储空间不足，请清理后重试"
-        MealError.PhotoIoFailure -> "图片保存失败，请重新选择图片"
-        else -> "餐厅记录保存失败，请稍后重试"
     }
 
     private companion object {
@@ -270,15 +336,4 @@ class AddRestaurantViewModel @Inject constructor(
         const val KEY_ADDRESS = "add_address"
         const val KEY_PHOTOS = "add_photos"
     }
-}
-
-/**
- * 导入失败原因的用户文案。
- *
- * 区分“读不出来”与“不是图片”：前者通常是来源应用的授权问题，换个相册重选即可；
- * 后者是选错了文件类型，用户需要换一张图。
- */
-private fun PhotoStore.ImportFailure?.toImportMessage(): String = when (this) {
-    PhotoStore.ImportFailure.NOT_AN_IMAGE -> "所选文件不是有效的图片，请换一张重试"
-    else -> "图片导入失败，请重新选择"
 }

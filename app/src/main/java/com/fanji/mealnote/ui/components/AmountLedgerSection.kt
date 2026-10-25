@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -33,7 +33,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.fanji.mealnote.data.MAX_LEDGER_MINOR
 import com.fanji.mealnote.ui.formatLedgerAmount
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -65,7 +67,7 @@ fun AmountLedgerSection(
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionHeader(
             title = "入账金额",
-            subtitle = if (overridden) "已手动指定，不随花费文本变化"
+            subtitle = if (overridden) "保留当前金额，不随花费文本变化"
             else "从花费文本自动识别，识别不出可手动输入",
         )
         MiuixCard(
@@ -82,7 +84,7 @@ fun AmountLedgerSection(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            text = amountMinor?.formatLedgerAmount() ?: "—",
+                            text = amountMinor?.formatLedgerAmount() ?: "未入账",
                             style = MaterialTheme.typography.titleLarge,
                             color = if (amountMinor != null) {
                                 MaterialTheme.colorScheme.primary
@@ -157,6 +159,42 @@ fun AmountLedgerSection(
     }
 }
 
+/** 折叠编辑器时仍展示本次入账口径；金额不藏在选填区里。 */
+@Composable
+fun AmountLedgerSummary(
+    amountMinor: Long?,
+    personCount: Int,
+    overridden: Boolean,
+    onEdit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    MiuixCard(
+        onClick = onEdit,
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(16.dp),
+        elevation = 2.dp,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = ledgerSummaryLabel(amountMinor, personCount, overridden),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = "按整桌花费入账，不一定是你实际支付的金额 · 点此调整",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+internal fun ledgerSummaryLabel(amountMinor: Long?, personCount: Int, overridden: Boolean): String {
+    val mode = if (overridden) "已确认" else "自动识别"
+    return if (amountMinor == null) "$mode · 未入账"
+    else "$mode · ${amountMinor.formatLedgerAmount()} · $personCount 人"
+}
+
 /** 人数步进行：-/+ 各 48dp 触摸区，中间显示当前人数与「人均」提示。 */
 @Composable
 private fun PersonCountRow(count: Int, onChange: (Int) -> Unit) {
@@ -181,7 +219,9 @@ private fun PersonCountRow(count: Int, onChange: (Int) -> Unit) {
         Text(
             text = count.toString(),
             style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.width(40.dp),
+            textAlign = TextAlign.Center,
+            // 用 min 而不是定宽：系统大字体下两位数（10..20）会被 40dp 固定宽度裁掉。
+            modifier = Modifier.widthIn(min = 40.dp),
         )
         StepperButton(
             icon = Icons.Rounded.Add,
@@ -241,7 +281,7 @@ private fun AmountEditor(
             placeholder = "158 或 158.5",
             singleLine = true,
             isError = hasError,
-            supportingText = if (hasError) "请输入数字金额" else null,
+            supportingText = if (hasError) "请输入 0.01–1,000,000 之间的金额" else null,
             keyboardType = KeyboardType.Decimal,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -291,14 +331,25 @@ private fun perCapitaText(amountMinor: Long, personCount: Int): String {
     return per.movePointLeft(2).stripTrailingZeros().toPlainString().let { "¥$it" }
 }
 
-/** 用户输入（元）→ 分。非正数或无法解析返回 null。容忍 ¥、逗号与全角数字间隔。 */
-private fun parseDraftToMinor(draft: String): Long? =
-    draft.trim()
+/**
+ * 用户输入（元）→ 分。只接受 0.01–¥1,000,000（与自动识别共用 [MAX_LEDGER_MINOR]），
+ * 无法解析或越界一律返回 null，**绝不抛异常**。容忍 ¥、半角/全角逗号。
+ *
+ * 边界必须在 [BigDecimal] 域判、再 `longValueExact()` 窄化：19 位以上的输入
+ * 在 `longValueExact()` 会直接抛 `ArithmeticException`，绕过范围判断后变成崩溃。
+ */
+private fun parseDraftToMinor(draft: String): Long? {
+    val yuan = draft.trim()
         .removePrefix("¥")
         .replace(",", "")
         .replace("，", "")
         .toBigDecimalOrNull()
-        ?.takeIf { it > BigDecimal.ZERO }
-        ?.multiply(BigDecimal(100))
-        ?.setScale(0, RoundingMode.HALF_UP)
-        ?.longValueExact()
+        ?: return null
+    val cents = yuan.multiply(BigDecimal(100))
+        .setScale(0, RoundingMode.HALF_UP)
+    if (cents < BigDecimal.ONE || cents > MAX_DRAFT_MINOR_DECIMAL) return null
+    return cents.longValueExact()
+}
+
+/** [MAX_LEDGER_MINOR] 的 [BigDecimal] 形态，用于窄化到 Long 之前的范围比较。 */
+private val MAX_DRAFT_MINOR_DECIMAL = BigDecimal.valueOf(MAX_LEDGER_MINOR)

@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -220,6 +221,7 @@ fun WantListScreen(
                         restaurant = restaurant,
                         visitCount = uiState.visitCounts[restaurant.id] ?: 0,
                         latestVerdict = uiState.latestVerdicts[restaurant.id],
+                        dishMatchSummary = uiState.dishMatchSummaries[restaurant.id],
                         onClick = { onOpenRestaurant(restaurant.id) },
                         // animateItem 处理已有条目的位置变化，staggeredEnter 处理新条目的入场。
                         modifier = Modifier
@@ -495,6 +497,7 @@ private fun RestaurantCard(
     restaurant: RestaurantEntity,
     visitCount: Int,
     latestVerdict: Verdict?,
+    dishMatchSummary: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -513,6 +516,16 @@ private fun RestaurantCard(
             latestVerdict = latestVerdict,
             press = press(),
         )
+        dishMatchSummary?.let { summary ->
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "餐品匹配：$summary",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

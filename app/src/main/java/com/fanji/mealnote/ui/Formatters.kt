@@ -84,9 +84,14 @@ fun Long.formatFullDate(): String =
  *
  * 用 `YearMonth` 而非 `LocalDate` 取年月：跨年时 `2025年12月` 与 `2026年1月`
  * 必须落在不同分组，只取 `month` 字段会把它们混在一起。
+ *
+ * [zone] 作参数（默认系统时区）：同一条记录在不同时区可能属于不同的年月。
+ * 分组标题必须与统计口径（`FootprintAggregation.toYearMonth(zone)`）用**同一个时区**，
+ * 否则跨年零点附近的记录会出现「统计算今年、标题写去年」的错位。
+ * 默认值仅为兼容既有调用点，需要与统计对齐的地方必须显式传参。
  */
-fun Long.formatMonthLabel(): String =
-    Instant.ofEpochMilli(this).atZone(ZoneId.systemDefault()).format(monthFormatter)
+fun Long.formatMonthLabel(zone: ZoneId = ZoneId.systemDefault()): String =
+    Instant.ofEpochMilli(this).atZone(zone).format(monthFormatter)
 
 /** 把 epoch 毫秒格式化为「日 + 星期」，用于时间线条目。 */
 fun Long.formatDayLabel(): String =

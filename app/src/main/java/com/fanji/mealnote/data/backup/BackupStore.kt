@@ -24,6 +24,7 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -134,9 +135,14 @@ class BackupStore @Inject constructor(
             return@withContext MealResult.Failure(MealError.InvalidInput(INVALID_ARCHIVE))
         }
 
-        val stagingDir = File(context.cacheDir, STAGING_DIR_NAME)
+        // 每次恢复使用唯一目录：SAF 导入与 WebDAV 下载触发的恢复可能并发执行，
+        // 共用固定目录时，后进入的一次 `deleteRecursively()` 会把前一次正在读取的
+        // 暂存照片删掉，表现为随机的「图片缺失 / 损坏」甚至整次导入失败。
+        // 代价是进程被杀时 finally 不会执行、残留目录不再被下一次恢复自动覆盖，
+        // 因此进入前顺手清掉足够陈旧的中转目录（并发中的目录很新，不会被误删）。
+        cleanupStaleStagingDirs()
+        val stagingDir = File(context.cacheDir, "$STAGING_DIR_NAME-${UUID.randomUUID()}")
         try {
-            stagingDir.deleteRecursively()
             check(stagingDir.mkdirs()) { "Unable to create staging dir" }
 
             val input = context.contentResolver.openInputStream(source)
@@ -145,31 +151,34 @@ class BackupStore @Inject constructor(
             val parsed = input.use { stream -> readArchive(stream, stagingDir) }
                 ?: return@withContext MealResult.Failure(MealError.InvalidInput(INVALID_ARCHIVE))
 
-            // 复制到应用私有照片目录。失败的图片被跳过而不是整体失败：
-            // 单张损坏不应该让整份备份无法恢复。
-            // 键为包内文件名，值为复制后的私有目录绝对路径。
-            var skipped = 0
-            val resolvedPaths = HashMap<String, String>()
-            stagingDir.listFiles().orEmpty().forEach { staged ->
-                val copied = photoStore.importFile(staged)
-                if (copied == null) skipped++ else resolvedPaths[staged.name] = copied
-            }
-
-            val outcome = repository.replaceAllData(
-                restaurants = parsed.restaurants,
-                records = parsed.records,
-                photos = parsed.photos.filter { resolvedPaths.containsKey(it.filePath) },
-                resolvedPaths = resolvedPaths,
+            // 包内原本缺失的图片仍由解析/入库校验过滤；本次落盘失败则必须整次中止，
+            // 不能先跳过图片再覆盖旧数据库。执行器仅经数据库引用守卫回收本次新图。
+            val stagedPhotos = stagingDir.listFiles()?.toList()
+                ?: throw IOException("Unable to list staged photos")
+            val outcome = executeRestore(
+                stagedPhotos = stagedPhotos,
+                importPhoto = photoStore::importFile,
+                replace = { resolvedPaths ->
+                    repository.replaceAllData(
+                        restaurants = parsed.restaurants,
+                        records = parsed.records,
+                        photos = parsed.photos.filter { resolvedPaths.containsKey(it.filePath) },
+                        resolvedPaths = resolvedPaths,
+                    )
+                },
+                reclaimUnreferenced = repository::deleteUnreferencedFiles,
             )
 
             when (outcome) {
                 is MealResult.Failure -> outcome
                 is MealResult.Success -> MealResult.Success(
                     RestoreSummary(
-                        restaurantCount = parsed.restaurants.size,
-                        recordCount = parsed.records.size,
-                        photoCount = parsed.photos.count { resolvedPaths.containsKey(it.filePath) },
-                        skippedPhotos = skipped,
+                        // 用实际入库行数而不是解析条数：备份包里的非法行会被导入侧校验丢弃。
+                        restaurantCount = outcome.value.restaurantCount,
+                        recordCount = outcome.value.recordCount,
+                        photoCount = outcome.value.photoCount,
+                        // 本次复制全部成功才会走到这里；不把复制失败伪装成跳过后恢复成功。
+                        skippedPhotos = 0,
                     )
                 )
             }
@@ -182,8 +191,8 @@ class BackupStore @Inject constructor(
         } catch (error: Exception) {
             MealResult.Failure(MealError.DatabaseFailure(error))
         } finally {
-            // 无论成功失败都清理暂存目录，避免占用缓存空间。
-            // 协程取消同样会经过这里，暂存清理不受影响。
+            // 无论成功失败都清理**本次**的暂存目录，避免占用缓存空间。
+            // 协程取消同样会经过这里，暂存清理不受影响；目录唯一，不会误删并发调用的暂存内容。
             stagingDir.deleteRecursively()
         }
     }
@@ -369,6 +378,23 @@ class BackupStore @Inject constructor(
 
     // ------------------------------------------------------------ 读取实现
 
+    /**
+     * 清理进程被杀等原因留下的陈旧暂存目录。
+     *
+     * 只删超过 [STALE_STAGING_AGE_MS] 的目录：一次正常恢复（含最大 2GB 解压）远小于
+     * 这个时长，正在并发执行的另一次恢复不会被误删。
+     */
+    private fun cleanupStaleStagingDirs() {
+        val cutoff = System.currentTimeMillis() - STALE_STAGING_AGE_MS
+        context.cacheDir.listFiles().orEmpty()
+            .filter {
+                it.isDirectory &&
+                    it.name.startsWith("$STAGING_DIR_NAME-") &&
+                    it.lastModified() < cutoff
+            }
+            .forEach { it.deleteRecursively() }
+    }
+
     /** 解析后的备份内容；照片正文已解压到 [stagingDir]。 */
     private data class ParsedArchive(
         val restaurants: List<RestaurantEntity>,
@@ -380,8 +406,10 @@ class BackupStore @Inject constructor(
      * 解析 ZIP。
      *
      * 防御性设计：
-     * - 限制单个条目与总解压体积，防止构造出的高压缩比文件耗尽存储；
+     * - 限制条目数量与单个条目 / 总解压体积：累计字节上限挡不住「大量极小条目」，
+     *   几十万个空条目解压后只占几块磁盘，却足以耗尽文件系统 inode 与解压时间；
      * - 只解压 `photos/` 前缀下的条目，其余一律忽略，避免路径穿越写出到暂存目录之外；
+     * - 条目名统一经 [safePhotoEntryName] 压平为单一文件名，非法名直接丢弃；
      * - 校验格式版本，拒绝来自更高版本的备份。
      */
     private fun readArchive(input: InputStream, stagingDir: File): ParsedArchive? {
@@ -391,10 +419,15 @@ class BackupStore @Inject constructor(
         var photosJson: String? = null
         val photoFiles = mutableSetOf<String>()
         var totalBytes = 0L
+        var entryCount = 0
 
         ZipInputStream(input.buffered()).use { zip ->
             var entry: ZipEntry? = zip.nextEntry
             while (entry != null) {
+                entryCount++
+                if (entryCount > MAX_ARCHIVE_ENTRIES) {
+                    throw IOException("Backup archive has too many entries")
+                }
                 val name = entry.name
                 when {
                     name == MANIFEST_ENTRY -> manifest = zip.readTextCapped(MAX_JSON_BYTES)
@@ -402,10 +435,10 @@ class BackupStore @Inject constructor(
                     name == RECORDS_ENTRY -> recordsJson = zip.readTextCapped(MAX_JSON_BYTES)
                     name == PHOTOS_ENTRY -> photosJson = zip.readTextCapped(MAX_JSON_BYTES)
                     name.startsWith("$PHOTO_DIR/") && !entry.isDirectory -> {
-                        // 只取文件名部分：`photos/../../etc/passwd` 这类条目会被规范化为
-                        // 单个文件名，无法逃出暂存目录。
-                        val fileName = File(name).name
-                        if (fileName.isNotEmpty() && fileName.length <= MAX_NAME_LENGTH) {
+                        // safePhotoEntryName 只保留最后一段文件名：`photos/../../etc/passwd`
+                        // 这类条目会被规范化为 `passwd`，无法逃出暂存目录。
+                        val fileName = safePhotoEntryName(name)
+                        if (fileName != null) {
                             val target = File(stagingDir, fileName)
                             target.outputStream().use { out ->
                                 totalBytes += zip.copyToCapped(out, MAX_PHOTO_BYTES)
@@ -530,6 +563,13 @@ class BackupStore @Inject constructor(
         const val RECORDS_ENTRY = "dining_records.json"
         const val PHOTOS_ENTRY = "photos.json"
         const val PHOTO_DIR = "photos"
+
+        /**
+         * 暂存目录名的固定前缀。
+         *
+         * 实际目录名追加 UUID（`backup_staging-<uuid>`），保证并发恢复互不干扰；
+         * 保留固定前缀是为了让缓存目录里的残留目录可辨识，也便于将来做陈旧目录清理。
+         */
         const val STAGING_DIR_NAME = "backup_staging"
 
         /** 单个 JSON 条目上限，正常数据远小于此值。 */
@@ -538,7 +578,18 @@ class BackupStore @Inject constructor(
         const val MAX_PHOTO_BYTES = 32L * 1024 * 1024
         /** 整个备份解压后的总上限。 */
         const val MAX_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
-        const val MAX_NAME_LENGTH = 128
+
+        /**
+         * ZIP 条目数上限。
+         *
+         * 累计字节上限挡不住「大量极小条目」：每个空条目解压后只占几个文件系统块，
+         * 但 2GB 的字节额度可以容纳几十万个，足以耗尽 inode 并让解压拖到用户放弃。
+         * 个人账本即使上千条用餐记录、每餐 9 张照片，条目数也在一万上下，20_000 留足余量。
+         */
+        const val MAX_ARCHIVE_ENTRIES = 20_000
+
+        /** 暂存目录的陈旧阈值：超过一天未修改的中转目录在下次恢复前清理。 */
+        const val STALE_STAGING_AGE_MS = 24L * 60 * 60 * 1000
 
         /**
          * 用户可选择的备份文件上限。
@@ -578,4 +629,27 @@ class BackupStore @Inject constructor(
             cursor.getLong(index).takeIf { it >= 0 }
         }
     }.getOrNull()
+}
+
+/**
+ * 照片条目名的长度上限。
+ *
+ * 常见文件系统单段文件名上限为 255 字节，128 字符对 UTF-8 编码的中文名也留有余量；
+ * 导出侧生成的 `record<id>_<sort>.jpg` / `cover<id>.jpg` 远短于此。
+ */
+private const val MAX_NAME_LENGTH = 128
+
+/**
+ * 把 ZIP 条目名压平为暂存目录内的单一文件名；无法安全使用时返回 null。
+ *
+ * 导入的备份包是不可信输入：条目名可能是 `photos/../../databases/meal_note.db`，
+ * 直接当路径用会写到暂存目录之外。`File(name).name` 只保留最后一段，结果不含路径分隔符，
+ * 拼到暂存目录下只会生成该目录内的文件；空名、点段名（`.` / `..`）与超长名返回 null
+ * （超长名可用来占用文件系统条目空间，正常备份不会产生；点段名虽写不出目录，但没有任何
+ * 合法用途，直接丢弃比让整次导入以 IO 失败告终更清楚）。
+ */
+internal fun safePhotoEntryName(entryName: String): String? {
+    val name = File(entryName).name
+    if (name.isEmpty() || name == "." || name == ".." || name.length > MAX_NAME_LENGTH) return null
+    return name
 }

@@ -18,6 +18,13 @@
   「手工同步 README 测试类清单」不再是默认约定 —— **阶段 0 的第 5 条与横切线第 5 条到此收敛**。
 - 因此本文件的验收门可照旧，但不必再为「清单漂移」写额外脚本。
 
+## 2026-10-20 打磨轮状态校准（未发版）
+
+- 测试 **29 套件 / 266 例**全过，`lintDebug` / `assembleDebug` / `assembleRelease` 通过；无 schema 变更、无版本号变动。
+- **不在本清单里、但本轮修掉的系统性缺陷**：`updateAndGet` 之后用返回值判断 `isSaving`/`isBusy` 的守卫是**反的**（返回值是写入后的状态，守卫永不生效），并发点击会各写一次库。新增 `ui/StateTransitions.kt#tryTransition`（CAS），替换四个表单、详情页与设置页全部失效守卫。照片导入通道、`removePhoto` 回收与 `onCleared` 跳过也都改为同一次 CAS 取一致快照。
+- 顺手推进的清单条目：2.2 的 `VerdictSelector` 弹簧归位、1.7 的 `beginBusy` 统一守卫（**`runExclusive{}` 未抽**）、5.1 的设置页二级页化（**文件未拆**）。
+- 仍未做、状态不变：1.1–1.6（`UNCHECKED_CAST` 仍 3 处、`MealErrorMessages` 未抽）、2.1 `Dimens.kt`、2.4/2.5、3.2–3.5、4.1–4.7（`AnimatedCounter` 语义、`liveRegion` 仍 0 处、触摸区/固定高容器）、5.2–5.4（Migrations 仍在 `di/`）。
+
 ## 背景结论（调研快照，2026-09-29）
 
 - 未提交批次本身完整：9 个新生产文件全部有接线、有纯函数、有 JVM 测试，无孤儿代码。
@@ -54,14 +61,14 @@
 | 1.4 | 抽 `MealErrorMessages.kt`：6 份 `MealError→文案` when 收敛为单一纯函数 + 穷举测试；4 份 `toImportMessage` 副本合一 | ⬜ |
 | 1.5 | 店名 / 地址入库前纳入 `MealText.normalizeText(limit)` 上限（code point 安全，补截断测试）；照片上限双常量归一 | ⬜ |
 | 1.6 | `isAllowedScheme`、`WebDavConfig.remoteUrl()` 补单元测试 | ⬜ |
-| 1.7 | `SettingsViewModel` 抽 `runExclusive{}`，消 7 处忙碌保护样板（行为不变） | ⬜ |
+| 1.7 | `SettingsViewModel` 抽 `runExclusive{}`，消 7 处忙碌保护样板（行为不变） | 🔶 部分：打磨轮抽出 `beginBusy(label)` 统一 9 个长任务的忙碌守卫（内部 `tryTransition`），并给每个长任务补异常兜底，避免一次异常把 `isBusy` 永久留在 true；`runExclusive{}` 尚未抽出，try/catch 样板仍在 |
 
 ## 阶段 2 · 设计令牌与排版
 
 | # | 事项 | 状态 |
 |---|---|---|
 | 2.1 | 新建 `ui/theme/Dimens.kt`：页边距 20 / 卡内 16~18 / 列表节奏 14 / 顶栏底栏高 / 按钮最小高等语义令牌；收编 ≈60 处硬编码字面量，并拉回违规值（WantList 卡内 12→16、Settings/WebDAV 14/4 节奏、EmptyStateBlock 16→20、PickRestaurant contentPadding、RowDivider 56dp 魔法值转共享常量） | ⬜ |
-| 2.2 | 新建 `MealSprings` 弹簧常量表（Press/Enter/Counter/Transitions/Sheet），替换 Motion.kt、Miuix.kt、MainScaffold.kt、VerdictSelector、MealNoteApp 五处散装参数 | 🔶 部分：`MealNoteApp` 两处内联 `spring` 已改取 `MealMotion.settle`；常量表未建，`Miuix.kt`/`MainScaffold.kt`/`VerdictSelector.kt`/`Motion.kt` 仍是散装参数 |
+| 2.2 | 新建 `MealSprings` 弹簧常量表（Press/Enter/Counter/Transitions/Sheet），替换 Motion.kt、Miuix.kt、MainScaffold.kt、VerdictSelector、MealNoteApp 五处散装参数 | 🔶 部分：`MealNoteApp` 两处内联 `spring` 与 `VerdictSelector.kt` 的颜色/缩放弹簧已改取 `MealMotion`（打磨轮）；常量表未建，`Miuix.kt`/`MainScaffold.kt`/`Motion.kt` 仍是散装参数 |
 | 2.3 | `Type.kt` 补 `headlineSmall` / `titleSmall`；修 ShareCard 店名静默回落 Roboto；ShareCard 与 YearReviewCard ≈70 行重复骨架抽共享卡壳 | 🔶 前两项 ✅（`Type.kt` 已有 `headlineSmall`/`titleSmall`，业务组件与两张卡都在用）；**共享卡壳未做** |
 | 2.4 | 圆角野值治理：底部导航 / 详情底栏 28→阶梯、FAB 20→24；图表微圆角在 DESIGN_SYSTEM 新增「图表微元素豁免」条款 | ⬜ |
 | 2.5 | 排版修复：统计柱顶金额 `maxLines=1` 补 `overflow=TextEllipsis`；OverviewCard 四格窄屏挤压加最小宽约束 | ⬜ |
@@ -100,7 +107,7 @@
 
 | # | 事项 | 状态 |
 |---|---|---|
-| 5.1 | `FootprintScreen`（1171 行）按卡拆入 `ui/home/stats/`；`SettingsScreen` 按 section 同法拆 | ⬜ |
+| 5.1 | `FootprintScreen`（1171 行）按卡拆入 `ui/home/stats/`；`SettingsScreen` 按 section 同法拆 | 🔶 部分：设置页已拆成 6 个二级分区页（路由 `settings/{section}` + `SettingsSectionScreen`，与「我的」共享 `SettingsViewModel`），但 `SettingsScreen.kt` 仍是 848 行单文件，按 section 拆文件未做；`FootprintScreen`（现 1224 行）未拆 |
 | 5.2 | 纯函数归位 + 补测：`compactLedgerAmount`→Formatters（与 formatLedgerAmount 规则统一）；`defaultBackupName` 复用 `BackupStore.defaultFileName`；`effectiveAmountMinor` 与详情页 visits 派生并入 `DetailStats`；分享 Intent 构造 2 份合一 | ⬜ |
 | 5.3 | `Migrations` 从 `di/DatabaseModule` 迁至 `data/local/Migrations.kt`（androidTest 同步引用） | ⬜ |
 | 5.4 | 依赖清理：移除无引用的 espresso / compose-ui-test / ui-test-manifest（androidx-test runner 视迁移测试需要保留） | ⬜ |
@@ -115,10 +122,11 @@
 
 ## 明确延后（下一轮候选）
 
-- **删除撤销**（ROADMAP v0.6.x）：推荐**进程内存撤销**方案草案——删除仍走现有
-  `deleteUnreferencedFiles` 时序，仅在 snackbar 存活期内把删除前的实体与文件引用
-  暂存 ViewModel 内存，撤销时整体重插；进程死亡即不可撤销。零 schema、不动文件
-  生命周期协议。软删列方案（schema v5 + Migration）暂不采用。
+- **删除撤销**（ROADMAP v0.6.x）：原「即时回收文件 + 内存重插实体」草案不可直接实施——
+  `deleteUnreferencedFiles` 会实际删除最后一处引用消失的照片，仅保存路径不能恢复字节。
+  零 schema 方案仍可评估，但必须先确定撤销窗口内延迟物理回收、保留副本或延迟删除的协议，
+  并验证超时、连续删除与进程死亡；**本轮不实现撤销、不改文件生命周期**。
+  软删列方案（schema v5 + Migration）暂不采用。核查依据见 `docs/PROJECT_AUDIT_2026-10-22.md`。
 - **WebDAV 自动备份**：门槛未解锁——手动同步从未在真实服务器验证（AGENTS §5-3、ROADMAP）。
 - **表单 VM 骨架去重**（PersistedForm + 照片导入限流 4 份复制）与 **MealRepository 拆
   BackupRepository**：触及照片文件生命周期等「改后必须人工逐分支重读」的高危代码，

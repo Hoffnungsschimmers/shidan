@@ -4,6 +4,7 @@ import com.fanji.mealnote.data.local.DiningRecordEntity
 import com.fanji.mealnote.data.local.RestaurantEntity
 import com.fanji.mealnote.data.local.RestaurantStatus
 import com.fanji.mealnote.data.local.Verdict
+import com.fanji.mealnote.data.settings.RestaurantSort
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -144,5 +145,164 @@ class HomeFilterTest {
     fun `没有餐品的店不会因为别人记过菜而被搜到`() {
         val only = listOf(restaurant(1, "老王面馆", "朝阳区建国路 1 号", RestaurantStatus.EATEN))
         assertTrue(only.filterBy("小龙虾", HomeFilter.ALL).isEmpty())
+    }
+
+    // ------------------------------------------------------------ 可见命中解释
+
+    @Test
+    fun `餐品匹配返回可见店铺和真实命中摘要`() {
+        val result = sample.searchForList("小龙虾", HomeFilter.ALL, dishNames, RestaurantSort.RECENT_UPDATED)
+        assertEquals(listOf(2L), idsIn(result.restaurants))
+        assertEquals(mapOf(2L to "麻辣小龙虾、冰镇酸梅汤"), result.dishMatchSummaries)
+    }
+
+    @Test
+    fun `摘要取第一条真正命中的餐品且保持记录顺序`() {
+        val dishes = dishNamesByRestaurant(listOf(
+            dish(2, "宫保鸡丁"),
+            dish(2, "蒜香小龙虾"),
+            dish(2, "麻辣小龙虾"),
+        ))
+        val result = sample.searchForList("小龙虾", HomeFilter.ALL, dishes, RestaurantSort.RECENT_UPDATED)
+        assertEquals(mapOf(2L to "蒜香小龙虾"), result.dishMatchSummaries)
+    }
+
+    @Test
+    fun `店名匹配优先不额外展示餐品`() {
+        val stores = listOf(restaurant(2, "小龙虾之家"))
+        val result = stores.searchForList("小龙虾", HomeFilter.ALL, dishNames, RestaurantSort.RECENT_UPDATED)
+        assertEquals(listOf(2L), idsIn(result.restaurants))
+        assertTrue(result.dishMatchSummaries.isEmpty())
+    }
+
+    @Test
+    fun `地址匹配优先不额外展示餐品`() {
+        val stores = listOf(restaurant(2, "川味小馆", "小龙虾街 1 号"))
+        val result = stores.searchForList("小龙虾", HomeFilter.ALL, dishNames, RestaurantSort.RECENT_UPDATED)
+        assertEquals(listOf(2L), idsIn(result.restaurants))
+        assertTrue(result.dishMatchSummaries.isEmpty())
+    }
+
+    @Test
+    fun `空查询和清除后的空白查询都没有摘要`() {
+        for (query in listOf("", "   ", "　")) {
+            val result = sample.searchForList(query, HomeFilter.ALL, dishNames, RestaurantSort.RECENT_UPDATED)
+            assertEquals(4, result.restaurants.size)
+            assertTrue(result.dishMatchSummaries.isEmpty())
+        }
+    }
+
+    @Test
+    fun `无命中和被状态筛选排除都不留下摘要`() {
+        for ((query, filter) in listOf("不存在" to HomeFilter.ALL, "小龙虾" to HomeFilter.WANT_TO_EAT)) {
+            val result = sample.searchForList(query, filter, dishNames, RestaurantSort.RECENT_UPDATED)
+            assertTrue(result.restaurants.isEmpty())
+            assertTrue(result.dishMatchSummaries.isEmpty())
+        }
+    }
+
+    @Test
+    fun `摘要和搜索共用首尾去空白及英文忽略大小写规则`() {
+        val result = sample.searchForList("  CRAB　", HomeFilter.EATEN, dishNames, RestaurantSort.RECENT_UPDATED)
+        assertEquals(listOf(3L), idsIn(result.restaurants))
+        assertEquals(mapOf(3L to "Salted Pepper Crab"), result.dishMatchSummaries)
+    }
+
+    @Test
+    fun `数据更新后摘要重新派生且删除后不残留`() {
+        val updated = sample.searchForList("小龙虾", HomeFilter.ALL,
+            dishNamesByRestaurant(listOf(dish(2, "蒜香小龙虾"))), RestaurantSort.RECENT_UPDATED)
+        assertEquals(mapOf(2L to "蒜香小龙虾"), updated.dishMatchSummaries)
+        val removedDish = sample.searchForList("小龙虾", HomeFilter.ALL, emptyMap(), RestaurantSort.RECENT_UPDATED)
+        assertTrue(removedDish.restaurants.isEmpty())
+        assertTrue(removedDish.dishMatchSummaries.isEmpty())
+        val removedStore = sample.filter { it.id != 2L }
+            .searchForList("小龙虾", HomeFilter.ALL, dishNames, RestaurantSort.RECENT_UPDATED)
+        assertTrue(removedStore.dishMatchSummaries.isEmpty())
+    }
+
+    private fun summaryFor(dishes: String, query: String): String =
+        sample.searchForList(query, HomeFilter.ALL, mapOf(2L to listOf(dishes)), RestaurantSort.RECENT_UPDATED)
+            .dishMatchSummaries.getValue(2L)
+
+    private fun assertBoundedSummary(summary: String) {
+        assertTrue(summary.codePointCount(0, summary.length) <= 40)
+        assertTrue(summary.codePoints().noneMatch { it in 0xD800..0xDFFF })
+    }
+
+    @Test
+    fun `摘要截取命中处前后文且不切碎emoji`() {
+        val summary = summaryFor("😋".repeat(50) + "小龙虾" + "🦞".repeat(50), "小龙虾")
+        assertTrue(summary.contains("小龙虾"))
+        assertTrue(summary.startsWith("…"))
+        assertTrue(summary.endsWith("…"))
+        assertEquals(40, summary.codePointCount(0, summary.length))
+        assertBoundedSummary(summary)
+    }
+
+    @Test
+    fun `长餐品末尾命中仍出现在摘要且没有虚假尾省略号`() {
+        val summary = summaryFor("😋".repeat(80) + "麻辣小龙虾", "小龙虾")
+        assertTrue(summary.startsWith("…"))
+        assertTrue(summary.endsWith("麻辣小龙虾"))
+        assertBoundedSummary(summary)
+    }
+
+    @Test
+    fun `长餐品开头命中不加虚假首省略号`() {
+        val summary = summaryFor("小龙虾" + "😋".repeat(80), "小龙虾")
+        assertTrue(summary.startsWith("小龙虾"))
+        assertTrue(summary.endsWith("…"))
+        assertBoundedSummary(summary)
+    }
+
+    @Test
+    fun `超长emoji查询的摘要仍有界且是合法UTF16`() {
+        val query = "😋".repeat(60)
+        val summary = summaryFor(query + "冰镇酸梅汤", query)
+        assertTrue(summary.startsWith("😋"))
+        assertBoundedSummary(summary)
+    }
+
+    @Test
+    fun `多行餐品摘要折叠空白但不改变原文搜索谓词`() {
+        val dishes = mapOf(2L to listOf("麻辣\n\n　小龙虾\t酸梅汤"))
+        val result = sample.searchForList("小龙虾", HomeFilter.ALL, dishes, RestaurantSort.RECENT_UPDATED)
+        assertEquals(mapOf(2L to "麻辣 小龙虾 酸梅汤"), result.dishMatchSummaries)
+        val joined = sample.searchForList("麻辣小龙虾", HomeFilter.ALL, dishes, RestaurantSort.RECENT_UPDATED)
+        assertTrue(joined.restaurants.isEmpty())
+        assertTrue(joined.dishMatchSummaries.isEmpty())
+    }
+
+    @Test
+    fun `刚好四十个codepoint的餐品不截断`() {
+        val dishes = "😋".repeat(37) + "小龙虾"
+        assertEquals(dishes, summaryFor(dishes, "小龙虾"))
+    }
+
+    @Test
+    fun `新搜索入口保持原搜索筛选和全部排序模式结果`() {
+        val stores = listOf(
+            RestaurantEntity(id = 1, name = "C", address = "Crab Road", status = RestaurantStatus.EATEN,
+                createdAt = 300, updatedAt = 100),
+            RestaurantEntity(id = 2, name = "A", status = RestaurantStatus.WANT_TO_EAT,
+                createdAt = 100, updatedAt = 300),
+            RestaurantEntity(id = 3, name = "B", status = RestaurantStatus.EATEN,
+                createdAt = 200, updatedAt = 200),
+        )
+        val dishes = mapOf(2L to listOf("Pepper Crab"), 3L to listOf("Salted Crab"))
+        for (filter in HomeFilter.entries) {
+            for (sort in RestaurantSort.entries) {
+                for (query in listOf("", "  CRAB ", "不存在")) {
+                    val expected = stores.filterBy(query, filter, dishes).sortedForList(sort)
+                    val actual = stores.searchForList(query, filter, dishes, sort)
+                    assertEquals(expected, actual.restaurants)
+                    assertTrue(actual.dishMatchSummaries.keys.all { id -> actual.restaurants.any { it.id == id } })
+                }
+            }
+        }
+        val all = stores.searchForList("crab", HomeFilter.ALL, dishes, RestaurantSort.RECENT_UPDATED)
+        assertEquals(listOf(2L, 3L, 1L), idsIn(all.restaurants))
+        assertEquals(mapOf(2L to "Pepper Crab", 3L to "Salted Crab"), all.dishMatchSummaries)
     }
 }

@@ -57,11 +57,11 @@ class AppLog @Inject constructor(
     suspend fun warn(tag: String, message: String) = write("W", tag, message)
 
     suspend fun error(tag: String, message: String, cause: Throwable? = null) =
-        write("E", tag, if (cause == null) message else "$message | ${cause.javaClass.simpleName}: ${cause.message.orEmpty().take(200)}")
+        write("E", tag, if (cause == null) message else "$message | ${cause.javaClass.simpleName}: ${cause.message.orEmpty().truncateByCodePoints(MAX_CAUSE_CHARS)}")
 
     /** 写入一条已格式化的完整日志行（形如 `MM-dd HH:mm:ss.SSS I/tag: msg`）。 */
     suspend fun writeLine(line: String) {
-        val sanitized = line.take(MAX_LINE_CHARS)
+        val sanitized = line.truncateByCodePoints(MAX_LINE_CHARS)
         mutex.withLock {
             buffer.addLast(sanitized)
             while (buffer.size > MAX_MEMORY_LINES) buffer.removeFirst()
@@ -73,7 +73,7 @@ class AppLog @Inject constructor(
 
     private suspend fun write(level: String, tag: String, message: String) {
         val sanitized = sanitizeTag(tag)
-        val line = "${STAMP_FORMAT.format(Date())} $level/$sanitized: ${message.take(MAX_LINE_CHARS)}"
+        val line = "${STAMP_FORMAT.format(Date())} $level/$sanitized: ${message.truncateByCodePoints(MAX_LINE_CHARS)}"
         mutex.withLock {
             buffer.addLast(line)
             while (buffer.size > MAX_MEMORY_LINES) buffer.removeFirst()
@@ -109,6 +109,29 @@ class AppLog @Inject constructor(
         return cleaned.ifBlank { "app" }
     }
 
+    /**
+     * 按 code point 截断，绝不把代理对切成两半。
+     *
+     * `take(n)` 数的是 UTF-16 单元：一个 emoji 占两个单元，恰好在中间截断会留下一个孤立代理，
+     * 导出的 txt 在编辑器里显示成乱码方块 —— 用户拿到这份日志只会以为日志本身坏了。
+     * 上限改按 code point 计（纯 BMP 文本下与原来按字符计数完全等价），切点用
+     * `offsetByCodePoints` 对齐到字符边界。
+     */
+    private fun String.truncateByCodePoints(max: Int): String {
+        if (length <= max) return this
+        val points = minOf(max, codePointCount(0, length))
+        return substring(0, offsetByCodePoints(0, points))
+    }
+
+    /** 两个列表的最长公共后缀长度，用于裁掉内存缓冲与文件尾部重合的那一段。 */
+    private fun commonSuffixLength(a: List<String>, b: List<String>): Int {
+        var matched = 0
+        while (matched < a.size && matched < b.size && a[a.size - 1 - matched] == b[b.size - 1 - matched]) {
+            matched++
+        }
+        return matched
+    }
+
     /** 导出日志文本（含设备与版本头），供设置页分享。 */
     suspend fun exportText(): String = withContext(Dispatchers.IO) {
         val header = buildString {
@@ -120,8 +143,12 @@ class AppLog @Inject constructor(
         }
         val memory = mutex.withLock { buffer.toList() }
         val fileLines = runCatching { logFile().takeIf { it.exists() }?.readLines().orEmpty() }.getOrDefault(emptyList())
-        // 文件与内存可能重复，以文件为主、内存补尾。
-        header + (fileLines + memory).distinct().takeLast(MAX_MEMORY_LINES).joinToString("\n")
+        // 同一行先入内存再落盘，所以内存缓冲通常是文件尾部的一段：直接拼接会让最近的日志出现两遍。
+        // 但也不能对正文 `distinct()` —— 用户连点两次会产生两条一模一样的日志，按内容去重会把其中
+        // 一条悄悄吞掉，而那一条恰恰是判断「点了几次」的证据。只裁掉文件尾与内存头的那段重合，
+        // 正文里合法的重复行原样保留。设备信息头由 buildString 一次生成，本身不可能重复。
+        val overlap = commonSuffixLength(fileLines, memory)
+        header + (fileLines + memory.drop(overlap)).takeLast(MAX_MEMORY_LINES).joinToString("\n")
     }
 
     /** 日志文件大小，供设置页展示。 */
@@ -134,8 +161,10 @@ class AppLog @Inject constructor(
         const val LOG_FILE_NAME = "mealnote.log"
         const val MAX_MEMORY_LINES = 500
         const val MAX_FILE_BYTES = 200L * 1024
-        /** 单行上限，防止异常信息过长把日志文件撑爆。 */
+        /** 单行上限（按 code point 计，切点不劈开代理对），防止异常信息过长把日志文件撑爆。 */
         const val MAX_LINE_CHARS = 2_000
+        /** 异常 message 的附加上限：日志要能定位问题，不需要整段堆栈的文本。 */
+        const val MAX_CAUSE_CHARS = 200
         val STAMP_FORMAT = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
     }
 }

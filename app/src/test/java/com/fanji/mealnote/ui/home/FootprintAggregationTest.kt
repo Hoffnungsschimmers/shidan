@@ -271,7 +271,7 @@ class FootprintAggregationTest {
             entry(eatenAt = at(2026, 9, 10)),
             entry(eatenAt = at(2026, 8, 5)),
         )
-        val sections = entries.toSections()
+        val sections = entries.toSections(shanghai)
 
         assertEquals(listOf("2026年9月", "2026年8月"), sections.map { it.title })
         assertEquals(2, sections.first().entries.size)
@@ -280,6 +280,24 @@ class FootprintAggregationTest {
 
     @Test
     fun `没有记录时没有分组`() {
-        assertTrue(emptyList<FootprintEntry>().toSections().isEmpty())
+        assertTrue(emptyList<FootprintEntry>().toSections(shanghai).isEmpty())
+    }
+
+    @Test
+    fun `月份分组的时区归属与统计一致`() {
+        // UTC 的 2025-12-31 23:30 在东八区已是 2026-01-01 07:30：
+        // 分组标题必须和「今年次数」等统计用同一个时区，否则会出现
+        // 「统计算 2026 年、标题却写 2025年12月」的错位。
+        val instant = at(2025, 12, 31, hour = 23, zone = utc)
+        val entries = listOf(entry(eatenAt = instant))
+
+        assertEquals(listOf("2025年12月"), entries.toSections(utc).map { it.title })
+        assertEquals(listOf("2026年1月"), entries.toSections(shanghai).map { it.title })
+
+        // 与统计口径对齐：同一时区下分组的年月等于 toYearMonth 的结果。
+        assertEquals(YearMonth.of(2025, 12), instant.toYearMonth(utc))
+        assertEquals(YearMonth.of(2026, 1), instant.toYearMonth(shanghai))
+        assertTrue(entries.all { it.isInYear(2026, shanghai) })
+        assertTrue(entries.all { it.isInYear(2025, utc) })
     }
 }

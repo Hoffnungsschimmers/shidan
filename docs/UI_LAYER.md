@@ -64,8 +64,8 @@
 - `estimatedSpendIn(year, zone)`:全识别不出返回 `null` 而非 `0.0`(「约 ¥0」会被读成「今年没花钱」)。
 - `toMonthlyCounts(today, zone, 12)`:以 today 向前推固定 12 月(横轴固定,缺月画短柱)。
 - `toTopRestaurants(5)`:按次数倒序,同次数按 id 升序(稳定,避免无理由跳动)。
-- `toSections()`:按月份分组,依赖上游 `eatenAt DESC` 排序保持「新月在前、月内新记录在前」。
-- **历年与年度回顾**:`List<FootprintEntry>.yearReviews(zone)` 按年聚合出 `YearReviewCardData`(年度次数/常去店/评价分布/入账优先口径,`YearReviewTest`);统计 tab 的「历年」卡逐行展示,点击行调 `FootprintViewModel.shareYearReview(year)` 把该年渲染成 `YearReviewCard` 分享图(复用 ShareCard 的 GraphicsLayer 录制骨架)。
+- `toSections(zone)`:按月份分组(月份归属与统计用**同一个时区**,分组标题经 `formatMonthLabel(zone)`),依赖上游 `eatenAt DESC` 排序保持「新月在前、月内新记录在前」。
+- **历年与年度回顾**:`List<FootprintEntry>.yearReviews(zone)` 按年聚合出 `YearReviewCardData`(年度次数/常去店/评价分布/入账优先口径,`YearReviewTest`);统计 tab 的「历年」卡逐行展示,点击行调 `FootprintViewModel.shareYearReview(year)` 把该年渲染成 `YearReviewCard` 分享图(复用 ShareCard 的 GraphicsLayer 录制骨架)。分享写盘失败时 `FootprintViewModel.shareError` 置位,界面在导航栏之上显示整块错误色横幅、显式「知道了」才关闭(失败提示不自动消失)。
 
 ### 2.4 账本(LedgerAggregation.kt)
 
@@ -75,7 +75,7 @@
 - `RestaurantSpend(restaurantId, restaurantName, amountMinor, visitCount)`;`LedgerCoverage(recognizedCount, textOnlyCount)`。
 - `ledgerSpendIn(year, zone)`:年度入账总额,一笔都没有返回 `null`(区别于 0)。
 - `ledgerMonthlyAmounts(today, zone, 12)`:最近 12 月入账,横轴固定同次数图。
-- `ledgerAverageAmount()`:平均每笔(四舍五入到分),无记录 null。
+- `ledgerAverageAmount(year, zone)`:**当年**平均每笔(四舍五入到分),该年无入账返回 null。它显示在「今年吃饭花了多少」卡里,混入往年记录会让数字与标题年份对不上(旧账越多偏离越大)。
 - `toTopSpendRestaurants(5)`:按累计金额倒序,同额按 id 升序;未入账不计金额也不计笔数。
 - `ledgerCoverageIn(year, zone)`:`recognizedCount`(有结构化金额)与 `textOnlyCount`(写了花费文本但没入账)→界面提示「另有 N 条写的是文字,可编辑时补录」。
 - **每月预算**:`BudgetPreference` 存每月预算(整数分,设置页「每月预算」行对话框输入);`monthlyBudgetProgress(spentMinor, budgetMinor)` 纯函数产出 `BudgetProgress?`(本月进度/超支/剩余;预算未设或本月无消费返回 null,`BudgetProgressTest`),足迹·账本概览卡显示进度条。刻意只做应用内展示,不做通知。
@@ -97,28 +97,28 @@
 
 ## 三、表单/详情域(detail/add/edit/visit)
 
-四个表单 ViewModel 的**共有架构模式**(详见 `docs/ARCHITECTURE.md` 第 5 节):原子状态跃迁防抖、SavedStateHandle 只持久化用户输入、`restoredFromSavedState` 构造时求值声明在 init 前、Room 订阅自动刷新。
+四个表单 ViewModel 的**共有架构模式**(详见 `docs/ARCHITECTURE.md` 第 5 节):原子状态跃迁防抖(`ui/StateTransitions.kt#tryTransition`,把「判断 + 置位」压进一次 CAS,不再拿 `updateAndGet` 的**写入后**状态当守卫快照)、SavedStateHandle 只持久化用户输入、`restoredFromSavedState` 构造时求值声明在 init 前、Room 订阅自动刷新。
 
 ### 3.1 detail 域
 
-- `RestaurantDetailScreen`(738 行):头图(250dp) + 悬浮信息卡 + 记录时间线 + 玻璃标题栏(据滚动 `derivedStateOf` 淡入) + 底部玻璃操作栏。三终态:isLoading→加载块;`detail==null`→「这家店已经不在了」;else→正常内容。底部栏「记录这一餐」恒显示;「照上次」仅 `latestRecordId` 非空时出现。VisitCard 编辑/删除用显式图标(非长按)。分享经 `pendingShareUri` + `buildShareIntent`(`ACTION_SEND`+`image/png`+`EXTRA_STREAM`+`FLAG_GRANT_READ_URI_PERMISSION`)。详情页只展示/查看照片,不导入/回收。信息卡「累计 ¥X」来自 `DetailStats.totalLedgerMinor(records)`(null≠0:一条都没入账时不显示)。
-- `RestaurantDetailViewModel`(225 行):`localState`(本地瞬时:弹窗/删除进度)与 `observeRestaurantWithRecords(id)` 订阅流 `combine`,避免弹窗态被上游覆盖。初始必须 `isLoading=true && detail=null`(否则 id 未注入时闪现空态)。`shareCard(bitmap)` 写盘(文件名带时间戳防覆盖)。删除用原子防抖,成功置 `deletionCompleted`。
+- `RestaurantDetailScreen`(738 行):头图(250dp) + 悬浮信息卡 + 记录时间线 + 玻璃标题栏(据滚动 `derivedStateOf` 淡入) + 底部玻璃操作栏。三终态:isLoading→加载块;`detail==null`→「这家店已经不在了」;else→正常内容。底部栏「记录这一餐」恒显示；「熟店快记」仅 `latestRecordId` 非空时出现（只复用餐品）。新记录保存后详情由返回栈 SavedStateHandle 接收 id，显示可关闭的确认及直接编辑入口。VisitCard 编辑/删除用显式图标(非长按)。分享经 `pendingShareUri` + `buildShareIntent`(`ACTION_SEND`+`image/png`+`EXTRA_STREAM`+`FLAG_GRANT_READ_URI_PERMISSION`)。详情页只展示/查看照片,不导入/回收。信息卡「累计 ¥X」来自 `DetailStats.totalLedgerMinor(records)`(null≠0:一条都没入账时不显示)。
+- `RestaurantDetailViewModel`(231 行):`localState`(本地瞬时:弹窗/删除进度)与 `observeRestaurantWithRecords(id)` 订阅流 `combine`,避免弹窗态被上游覆盖。初始必须 `isLoading=true && detail=null`(否则 id 未注入时闪现空态)。`shareCard(bitmap)` 写盘(文件名带时间戳防覆盖)。删除用原子防抖,成功置 `deletionCompleted`。
 
 ### 3.2 add 域
 
-- `AddRestaurantScreen`(181 行) + `AddRestaurantViewModel`(260 行):新建店铺。`continueToVisit` 由入口决定保存后去向(表单无记录类型开关)。字段:店名(必填)、地址、封面(≤1)。`photoPaths` 恒 0/1。`canSave = name.isNotBlank() && !isImporting && !isSaving && savedId==null`。相机 `pendingCameraPath` 用 `rememberSaveable`(防进程回收产生孤儿)。照片导入后**先更新状态再删除 obsolete**(IO 移出 update lambda 防重复删/阻塞主线程)。`onCleared` 仅 `savedId==null && !restoredFromSavedState` 时回收。
+- `AddRestaurantScreen`(181 行) + `AddRestaurantViewModel`(348 行):新建店铺。`continueToVisit` 由入口决定保存后去向(表单无记录类型开关)。字段:店名(必填)、地址、封面(≤1)。`photoPaths` 恒 0/1。`canSave = name.isNotBlank() && !isImporting && !isSaving && savedId==null`。相机 `pendingCameraPath` 用 `rememberSaveable`(防进程回收产生孤儿)。照片导入与拍照共用一条通道:启动协程前用 `tryTransition` 原子占位(检查 `isImportingPhotos` 并比对 `photoPaths` 快照),通道被占用时本次结果按取消处理并删目标文件,避免两条通道互相覆盖列表或误删对方文件;照片导入后**先更新状态再删除 obsolete**(IO 移出 update lambda 防重复删/阻塞主线程)。`removePhoto` 只在跃迁确认「未在保存且未保存成功」后才删文件。`onCleared` 仅 `savedId==null && !isSaving && !restoredFromSavedState` 时回收——保存已开始但结果未回写时,事务可能已提交,删文件会让刚写入的记录指向不存在的图片。
 - **重复店名提醒**(`DuplicateNameCheck.kt`):`normalizeRestaurantName`(去空白+忽略大小写)与 `List<RestaurantEntity>.findDuplicateName(input)`;输入店名命中已有店时表单顶部出现提醒卡,**只提醒不拦截**(同名店是合法场景,重复粘贴才是常见误操作)。`DuplicateNameCheckTest`。
 
 ### 3.3 edit 域
 
-- `EditRestaurantViewModel`(390 行)含核心纯函数 **`reclaimableFormPhotos(formPhotoPaths, originalCoverPath, recordPhotoPaths, keep)`**:`protectedPaths = recordPhotoPaths + originalCoverPath + keep`,只回收不在保护集里的(即「本次导入且当前未选中」)。9 个单测覆盖(项目最易丢数据的逻辑)。加载用 `restoredFromSavedState` 区分是否保留用户输入(不能在 load 里查 `savedStateHandle.contains`,否则编辑页永远空白)。save 时 `existing.copy(...)` **保留 status**(状态由记录数驱动)。`removePhoto` 不删文件(仍是 DB 封面,回收在 save 成功或 onCleared)。「从用餐照片选封面」`useRecordPhotoAsCover` 使 restaurants 与 photos 指向同文件(文件别名来源)。
-- `EditVisitViewModel`(386 行):含 `originalPhotoPaths` 区分新导入/已落库,`removePhoto` 只删新导入的。`effectiveAmountMinor` 派生:`if(amountOverridden) amountMinorUnits else parseLedgerAmountMinor(priceText, personCount)`。加载时 `personCountTouched = record.personCount>1`、`amountOverridden = amountMinorUnits!=null`。11 个 SavedState key,金额为空时 remove key 而非写 null。
+- `EditRestaurantViewModel`(422 行)含核心纯函数 **`reclaimableFormPhotos(formPhotoPaths, originalCoverPath, recordPhotoPaths, keep)`**:`protectedPaths = recordPhotoPaths + originalCoverPath + keep`,只回收不在保护集里的(即「本次导入且当前未选中」)。9 个单测覆盖(项目最易丢数据的逻辑)。加载用 `restoredFromSavedState` 区分是否保留用户输入(不能在 load 里查 `savedStateHandle.contains`,否则编辑页永远空白)。save 时 `existing.copy(...)` **保留 status**(状态由记录数驱动)。`removePhoto` 会回收**本次新导入且没有任何数据库行引用**的图片(能否删交给 `reclaimableFormPhotos` 判定,原封面与用餐照片无条件保留),且「移除」与「是否正在保存」在同一次 CAS 里取一致快照:保存先置位则只移除不删文件。`onCleared` 整体跳过 `saved` / `isSaving` / `restoredFromSavedState` 三种情况,再逐张排除原封面与用餐照片。「从用餐照片选封面」`useRecordPhotoAsCover` 使 restaurants 与 photos 指向同文件(文件别名来源)。
+- `EditVisitViewModel`：含 `originalPhotoPaths` 区分新导入/已落库。`EditVisitLoading.kt#applyExistingVisit` 加载时保留已有金额，包括 NULL（`amountOverridden=true`），修改其他字段不重新入账；恢复草稿时只补名称/原照片。`effectiveAmountMinor` 仍按覆盖优先派生，显式「恢复自动」才重新识别。图片变更与提交竞争 CAS，忙碌时拒绝移除/相机添加；回收前保护原照片、当前选择并查询数据库引用。金额为空时 remove SavedState key 而非写 null。
 
 ### 3.4 visit 域
 
-- `AddVisitViewModel`(448 行,`MAX_VISIT_PHOTOS=9`):字段顺序按回忆顺序(评价→日期→餐品→花费→照片→[折叠]记账+备注)。**屏幕默认精简**:`AddVisitScreen`/`EditVisitScreen` 用本地 `showMore`(rememberSaveable)把 `AmountLedgerSection`+备注折叠进 Text 档展开按钮,默认只露核心字段;折叠不影响入账(`effectiveAmountMinor` 仍从花费派生)。编辑页 `showMore` 在加载后若原记录有备注/改过金额/人数>1 则自动展开一次(`autoExpandApplied` 只应用一次)。`restaurantName` 经 `flatMapLatest` 订阅;`setRestaurantId` 写入 savedStateHandle(保存流程离页,进程回收后需恢复)。预填:`prefillFrom` 若 `restoredFromSavedState` 直接 return(不覆盖用户已改内容);`dateMillis` 用现在。`removePhoto` 无条件删(全部本次导入)。
+- `AddVisitViewModel`（`MAX_VISIT_PHOTOS=9`）：评价→日期→餐品/最近餐品点选→本次花费/历史花费参考。新增页照片与备注按需展开；已选照片、非空备注保持可见。金额编辑器折叠时 `AmountLedgerSummary` 常显，明确整桌口径与未入账；编辑页加载后按已有内容展开。名称与最近餐品经 `flatMapLatest` 订阅；预填不改打开表单日期，恢复草稿或 `prefillTouched`/导入/保存状态拒绝迟到覆盖。日期弹窗用 `MealDates.kt` 转换 UTC 自然日/本地业务日。保存成功返回新记录 id。`VisitPhotoTransitions.kt` 统一图片 CAS 守卫，引用查询失败保留文件并提示；`onCleared` 在 `saved`/`isSaving`/`restoredFromSavedState` 任一成立时跳过回收。
 - `PickRestaurantViewModel`(73 行):`combine(observeRestaurants, _query)`;空词按 `updatedAt DESC`,否则店名/地址子串匹配;`isSearchMiss`。独立选店页解决「刚吃完想马上记一笔」高频场景。
-- `VisitPrefill.kt`:`VisitPrefill` **刻意只 3 字段**(verdict/dishes/priceText);`prefillFromRecord(source, targetRestaurantId)` 强制校验餐厅归属(防 A 店餐品写进 B 店),source 为 null 或异店返回 null。测试用反射锁定字段集。
+- `VisitPrefill.kt`：`VisitPrefill` 只含 `dishes/referencePriceText`；来源不存在或异店返回 null，餐品复用不复制本次评价/金额/人数/备注/照片。`recentDishSuggestions` 按用餐时间/id 倒序、明确分隔符拆分/去重、最多8项；`appendRecentDish` 去重且 code point 有界。`VisitFormLogic.kt` 共用人数规则与部分导入反馈，测试直接调用生产函数。
 
 ### 3.5 Formatters.kt
 
@@ -141,7 +141,7 @@
 - `MiuixButtonStyle{Filled, Tonal, Outlined, Text}`;`MiuixButton(label, onClick, loading, style, height=54dp)`:`Filled&&active` 才加同色系 `softShadow`(12dp→按下 5dp) 并铺 `primary → primaryDeep` 垂直渐变(纯色档白字只有 3.18:1 的历史问题在此收深到 4.66:1、渐变暗端 7.14:1;实测公式见 `DESIGN_SYSTEM.md` 第三节);按下浮出一层 14% 白提亮;`heightIn(min=height)` 防大字体裁字;loading 保持宽度换转圈;无障碍 `clearAndSetSemantics` 补 `contentDescription`/`role=Button`/loading→`stateDescription="处理中"`/active→`onClick` 否则 `disabled`。
 - `MiuixChip(label, onClick, icon, selected, accent, height=40dp)`:轻量胶囊入口,给「排序」「抽一家」这类**不该占满一行**的次级动作。底色/描边/文字三处 `animateColorAsState(quick)` 同步过渡,按下时图标单独收紧 0.86(用只改绘制的 `graphicScale`,不改布局尺寸,否则同行文字会抖)。
 - `MiuixSegmented<T>`:高度 `maxOf(46dp, textHeight+inset*2+10dp)`(大字体撑高);指示块 `animateDpAsState(MealMotion.settle)` + `clearAndSetSemantics{}`,有 `accent` 时在纯白指示块上**再叠一层同色渐变**(不是直接用半透明色填底,那样底槽颜色会透上来,选中块看着像没填满);文字选中时颜色 + **字重**同时变;计数角标缩放。容器 `selectableGroup()` + 每项 `selectable(selected, role=Tab)`,切换时一次触觉反馈。
-- `MiuixTextField`:标签固定上方(非浮动);容器与描边由**外层自绘**(`softShadow` + `background` + `border`),TextField 全部容器色/indicator 置透明 —— 这样聚焦才是「描边淡入主色并加粗到 1.6dp + 6dp 主色光晕 + 底色转白」的连续过渡,而不是 Material 默认那种瞬间切换的下划线。error 用 errorContainer,cursor/selection 主色。
+- `MiuixTextField`:标签固定上方(非浮动);容器与描边由**外层自绘**(`softShadow` + `background` + `border`),TextField 全部容器色/indicator 置透明 —— 这样聚焦才是「描边淡入主色并加粗到 1.6dp + 6dp 主色光晕 + 底色转白」的连续过渡,而不是 Material 默认那种瞬间切换的下划线。error 用 errorContainer,cursor/selection 主色。`[label]` 同时作为输入框的可访问名称(`semantics { contentDescription = label }`):视觉标签在框外,读屏否则只会摸到一个无名编辑框;刻意不拼 `value`,避免密码框绕过视觉遮罩把口令念出来。
 - `MiuixTopBar`(无背景色,heightIn(min=60dp))、`MiuixIconButton`(48dp,pressScale 0.88f,图标 23dp)、`SectionHeader`(titleLarge+Bold,左侧 3×18dp 主色竖条作分组锚点,竖条 `clearAndSetSemantics{}`)、`MiuixListRow`(设置行,`destructive` 整行 error 色,可点行自动补右侧箭头,40dp 图标砖 12% 语义底)。
 - `StatCapsule(value, label, accent)`:大数字滚动 + 说明;**语义锁定终值**(`clearAndSetSemantics { contentDescription = "$label $value" }`),否则读屏会念出动画中间值。
 
@@ -155,14 +155,14 @@
 
 ### 4.3 表单积木与共享状态
 
-- `FormSections.kt`:`MealDateRow`(点开日期选择器)、`MealPhotoSection`(SectionHeader + LazyRow,`canAddPhoto=false` 隐藏入口)、`FormErrorLine`、`FormBottomGap`。段间 22dp、段内 12dp。
+- `FormSections.kt`:`MealDateRow`(点开日期选择器)、`MealPhotoSection`(SectionHeader + LazyRow,`canAddPhoto=false` 隐藏入口)、`FormErrorLine`、`FormErrorBanner`（用餐保存区常驻错误色+显式关闭+liveRegion播报）、`FormBottomGap`。段间 22dp、段内 12dp。
 - `CommonStates.kt`:`MealSearchField`(WantList/Footprint/Pick 共用,ImeAction.Search;药丸形 + 聚焦四件事同时发生:底色转白/描边淡入主色/放大镜变主色/整条上浮 6dp;清除按钮**常驻 trailingIcon 槽位** + `AnimatedVisibility`,做成条件槽位就没有退出动画且右侧瞬间空一截)、`PageHeader`(`eyebrow` 小字 + `displaySmall` 大标题 + 说明)、`EmptyStateBlock`(暖光圆底 + 极缓慢上下浮动:空页面是停留最久的地方,完全静止会读成「卡住了」)、`LoadingBlock`(固定纵向 padding 防高度跳变;**仅用于局部**如详情页/保存中)、`ListSkeleton`(整页列表加载态,按真实卡片尺寸画占位 + `skeletonShimmer`)。
-- `VerdictSelector.kt`:三选一 `selectableGroup()` + 每项 `selectable(role=RadioButton)`;选中态容器色+边框+缩放弹簧过渡。
-- `AmountLedgerSection.kt`(304 行,入账金额确认条):默认零操作展示识别金额,改错才展开手动输入。含 `PersonCountRow`(1..20 步进)、`AmountEditor`(Decimal 键盘);纯逻辑 `perCapitaText`、`parseDraftToMinor`(去 `¥`/`,`,×100 HALF_UP 转分)。
+- `VerdictSelector.kt`:三选一 `selectableGroup()` + 每项 `selectable(role=RadioButton)`;选中态容器色+边框+缩放过渡;弹簧一律取 `MealMotion`(`settle` 用于颜色/描边,`bouncy` 用于缩放),组件内不再写裸 `spring(...)`。
+- `AmountLedgerSection.kt`(319 行,入账金额确认条):默认零操作展示识别金额,改错才展开手动输入。含 `PersonCountRow`(1..20 步进,人数显示用 `widthIn(min=40dp)`,系统大字体下两位数不再被定宽裁掉)、`AmountEditor`(Decimal 键盘);纯逻辑 `perCapitaText`、`parseDraftToMinor`(去 `¥`/半角与全角逗号,`BigDecimal` 域先判 0.01–¥1,000,000 再 `longValueExact()` 窄化,越界或超长输入返回 null 而非抛 `ArithmeticException`;上限与自动识别共用 `MAX_LEDGER_MINOR`)。
 - `PhotoViewer.kt`(269 行):全屏 `Dialog`,左右滑切换、双击 1x↔2.5x、放大拖动平移(禁翻页);**不做双指缩放**(`detectTransformGestures` 消费全部指针使 pager 失效);顶栏「N/total」`clearAndSetSemantics` 播报「第 N 张,共 total 张」;`ContentScale.Fit`。
 - `GalleryPicker.kt`(168 行,含降级):`PickVisualMedia` 在无系统 Picker 无 GMS 设备上会崩,`isSystemPickerReady` 判断(API≥33 直接 true,否则 `getSynchronousResult`),失败退回 `GetContent`/`GetMultipleContents`;两路均无需存储权限。
 
-### 4.4 ShareCard.kt(265 行,分享卡片)
+### 4.4 ShareCard.kt(267 行,分享卡片)
 
 卡片是渲染而非固定图,先预览再分享(照片竖版裁剪无法预判,Compose 只能录制已绘制内容)。`ShareCardData`(不复用 DB 实体);`CARD_ASPECT_RATIO=3:4`。`ShareCardSheet` 用 `rememberGraphicsLayer` + `drawWithContent{ layer.record{drawContent()}; drawContent() }`,点分享 `layer.toImageBitmap().asAndroidBitmap()`(挂起等渲染完成),`isCapturing` 防连点。`ShareCardContent` 全出血:背景照片(Crop)或主色渐变→三段压深遮罩→右上「食单」水印→左下 VerdictBadge/店名/日期地址/餐品/花费胶囊/备注。
 
@@ -193,8 +193,9 @@
 
 ## 六、设置域(settings/)
 
-- `SettingsViewModel`(474 行,依赖最多):外观/流畅/随机/预算/清单排序/备份新鲜度的偏好转发 + 备份导出/恢复 + 账本 CSV 导出 + WebDAV 上传/下载 + 运行日志分享 + 清空数据。长任务共用忙碌横幅(`isBusy`,每段 `updateAndGet` 原子跃迁防重入);本地导出与 WebDAV 上传成功后 `BackupStatePreference.markBackedUp()`。`MealError→文案` 映射在 `MealError.toMessage(prefix)`。
-- `WebDavSection.kt`:配置表单(地址/账号/密码;回显一律先 `redactUrlCredentials()`)+「测试连接」(HEAD 探测,`webDavProbeFor` 五态归类:可达 / 需认证 / 未找到 / 协议不安全 / 网络异常,`WebDavProbeTest`)+ 上传 / 下载。失败提示整块错误色、不自动消失(AGENTS §6「失败必须可见」)。
+- 分区导航:「我的」只做导航,每行显示当前值摘要;`SettingsSection{APPEARANCE,RANDOM,LEDGER,BACKUP,STORAGE,ABOUT}` 的固定 slug 组成路由 `settings/{section}`,未知 slug 弹回,不留空白页;SAF 启动器、忙碌横幅与确认对话框只在会触发它们的分区页注册。
+- `SettingsViewModel`(551 行,依赖最多):外观/流畅/随机/预算/清单排序/备份新鲜度的偏好转发 + 备份导出/恢复 + 账本 CSV 导出 + WebDAV 上传/下载 + 运行日志分享 + 清空数据。9 个长任务统一走 `beginBusy(label)`(内部 `tryTransition` 原子守卫,重复点击只会有一次生效),每个长任务都有异常兜底,避免一次异常把 `isBusy` 永久留在 true 让按钮再也点不动。**与「我的」共享同一个实例**:`settings/{section}` 二级页经 `hiltViewModel` 取 MAIN 回退栈条目的 owner,离开分区页不会取消进行中的长任务,分区页导入/清空后父页统计同步刷新。本地导出与 WebDAV 上传成功后 `BackupStatePreference.markBackedUp()`。`MealError→文案` 映射在 `MealError.toMessage(prefix)`。
+- `WebDavSection.kt`:配置表单(地址/账号/密码;回显一律先 `redactUrlCredentials()`,把写进 URL 的 `user:pass@` 洗掉)+「测试连接」(对远端文件发 HEAD;文件侧 404 时再对目录发一次 HEAD,按 `classifyWebDavProbe` 归为**六态**:已有备份 `FILE_EXISTS` / 尚无备份 `FILE_ABSENT` / 目录不存在 `COLLECTION_ABSENT` / 认证失败 `AUTH_FAILED` / 需跳转 `REDIRECT` / 连不上 `UNREACHABLE`,`WebDavProbeTest` 9 例)+ 上传 / 下载。失败提示整块错误色、不自动消失(AGENTS §6「失败必须可见」)。
 - 备份新鲜度:「我的」页备份行副标题显示上次备份「今天 / 昨天 / N 天前 / 从未」(`backupFreshnessLabel` 纯函数,时钟回拨按今天兜底)。
 - 导出账本 CSV:SAF 创建 `mealnote-ledger-*.csv`,纯逻辑见 `data/export/`(DATA_LAYER §11b)。
 - 其余行:存储占用(照片目录大小)/清理无用文件/分享运行日志/清空数据(二次确认)/关于。

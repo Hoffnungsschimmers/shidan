@@ -1,0 +1,133 @@
+{
+  "assessedAt": "2026-10-22",
+  "scope": "current working tree, not only HEAD",
+  "branch": "main",
+  "head": "e3c0f3a",
+  "remote": "https://github.com/Hoffnungsschimmers/shidan.git",
+  "businessFilesChangedByAudit": false,
+  "version": { "versionCode": 17, "versionName": "0.6.1", "databaseVersion": 4 },
+  "inventory": {
+    "productionKotlinFiles": 72,
+    "productionKotlinLines": 18068,
+    "jvmTestFiles": 29,
+    "jvmTestAnnotations": 266,
+    "jvmTestLines": 3232,
+    "instrumentationTestFiles": 1,
+    "instrumentationTestAnnotationsAtStart": 1,
+    "instrumentationTestAnnotations": 6
+  },
+  "checks": [
+    {
+      "name": "scripts/run-unit-tests.ps1",
+      "exitCode": 0,
+      "result": "JUnitCore: OK (266 tests), 29 source-discovered classes",
+      "limit": "Compilation tasks UP-TO-DATE; this runner is not the Gradle native test runner."
+    },
+    {
+      "name": "testDebugUnitTest --rerun-tasks --no-build-cache",
+      "exitCode": 0,
+      "result": "33 executed Gradle tasks; XML: 29 suites, 266 tests, 0 failures, 0 errors, 0 skipped",
+      "warning": "WantListScreen.kt:357 Icons.Rounded.Sort deprecated"
+    },
+    {
+      "name": "lintDebug --no-build-cache",
+      "exitCode": 0,
+      "result": "No issues found",
+      "report": "app/build/reports/lint-results-debug.txt"
+    },
+    {
+      "name": "assembleDebug assembleRelease --no-build-cache",
+      "exitCode": 0,
+      "result": "101 actionable tasks: 6 executed, 95 up-to-date",
+      "limit": "Release compile/R8/package were UP-TO-DATE; this was an incremental build verification, not a forced release rebuild. No apk/ files replaced."
+    },
+    {
+      "name": "apksigner verify --verbose app/build/outputs/apk/release/app-release.apk",
+      "exitCode": 0,
+      "result": "Verifies; v2=true; one signer",
+      "command": "D:/env/jdk-17.0.16+8/bin/java.exe -Xms16m -Xmx256m -jar D:/env/android-sdk/build-tools/36.0.0/lib/apksigner.jar verify --verbose app/build/outputs/apk/release/app-release.apk",
+      "limit": "Initial apksigner.bat attempt used JAVA_HOME JDK21 and failed due Windows memory commit error 1455. Retried with explicit JDK17/bounded heap. No old-delivery certificate comparison performed."
+    },
+    {
+      "name": "in-memory Python SQLite migration comparison",
+      "result": {
+        "1->2": "Sample rows/values preserved; a raw DEFAULT mismatch remains: migrated recommendationPhotoPath has DEFAULT '', fresh exported v2 has no DEFAULT.",
+        "2->3": "Equivalent columns/defaults/indices/foreign keys; sample rows and values preserved; foreign_key_check empty.",
+        "3->4": "Equivalent columns/defaults/indices/foreign keys; sample rows and values preserved; foreign_key_check empty."
+      },
+      "limit": "Physical column ordinal excluded intentionally. This does not run Room or Android SQLite. Local Room 2.8.4 Column.equals bytecode ignores entity-vs-database DEFAULT differences when the entity declares no default, so the 1->2 raw mismatch alone does not prove a Room opening failure."
+    },
+    {
+      "name": "assembleDebugAndroidTest --no-build-cache",
+      "exitCode": 0,
+      "result": "58 actionable tasks: 32 executed, 26 up-to-date; app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk produced",
+      "limit": "No device execution. ZIP asset inspection confirmed both test APK and debug target APK have zero assets and no versioned schema JSON. Local Room 2.8.4 MigrationTestHelper.loadSchema checks these two contexts then throws FileNotFoundException. Test infrastructure needs androidTest assets source wiring before instrumented migration tests can run."
+    },
+    {
+      "name": "adb devices -l",
+      "result": "No attached devices",
+      "limit": "No emulator directory in D:/env/android-sdk, no local AVD directory. No app launch, UI, TalkBack or Room instrumentation execution."
+    },
+    {
+      "name": "git diff --check",
+      "exitCode": 0,
+      "result": "No whitespace errors"
+    },
+    {
+      "name": "tracked secret-name check",
+      "result": "git ls-files '*.jks' '*.keystore' 'local.properties' '.env*' returned no entries",
+      "limit": "Filename-based working-tree index check only, not a complete secret scan or git-history audit; credentials not read."
+    }
+  ],
+  "notExecuted": [
+    "connectedDebugAndroidTest",
+    "Compose UI tests",
+    "device install / upgrade / visual / large-font / TalkBack / motion-off verification",
+    "real WebDAV server upload/download/restore",
+    "actual SAF backup round-trip",
+    "large-dataset performance benchmark",
+    "20-second recording usability measurement"
+  ],
+  "assessmentMethod": "Four domain evaluations and all four adversarial results obtained. Original UI verifier returned later; narrow additional UI verification independently corrected Coil2.7 drawSize behavior. Main session owns baseline and cross-checks. No unreturned agent result was treated as complete.",
+  "platformCorrections": [
+    "Coil2.7 AsyncImagePainter installs drawSize resolver when request has no explicit resolver, and onDraw supplies actual drawing size; refuted blanket original-size decode allegation for bounded cover Image.",
+    "Material3 1.3.1 DatePicker selectedDateMillis is UTC calendar-day start; direct local-time display/persistence can shift selected date in negative timezones. Static dependency-bytecode confirmation only, no device reproduction.",
+    "Main session reproduced SQLite3.45.1 synthetic Long.MAX_VALUE AUTOINCREMENT insertion then DELETE: sequence remains max; next implicit insert fails code13. No user database accessed."
+  ],
+  "followUpScope": "User requested completion: androidTest schema-assets wiring, six migration paths, reusable APK asset check and documentation/report completion only. No business implementation, production migration/schema, dependency or application version changed. No commit/push.",
+  "finalDeliveryChecks": {
+    "evidenceJsonAndTestCount": "PASS: JSON parses; six source @Test annotations match inventory",
+    "reportLinks": "PASS: audit links in README and PROJECT_OVERVIEW resolve to local files",
+    "productionApkSchemaAssets": "PASS: debug and release APKs contain no assets/com.fanji.mealnote.data.local.AppDatabase/ entries",
+    "diffCheck": "PASS: git diff --check",
+    "protectedPaths": "No changes in app/schemas, production DatabaseModule, gradle/libs.versions.toml or apk/",
+    "publication": "Optional artifact publication unavailable under the current authentication mode; no URL created. Durable Markdown report and JSON evidence remain in docs/."
+  },
+  "followUpChecks": [
+    {
+      "name": "testDebugUnitTest assembleDebugAndroidTest --no-build-cache",
+      "exitCode": 0,
+      "result": "68 actionable tasks: 8 executed, 60 up-to-date; AndroidTest Kotlin compile, schema-assets merge and test APK package actually executed",
+      "limit": "JVM test task was UP-TO-DATE here; the earlier forced 266-test run remains the executed baseline. Six migration instrumentation cases compiled but did not run on a device."
+    },
+    {
+      "name": "scripts/check-migration-assets.ps1",
+      "exitCode": 0,
+      "result": "Four assets (1/2/3/4.json) each appear exactly once in the test APK; all SHA-256 hashes match source schemas",
+      "negativeCheck": "Before rebuilding with the fix, the script exited 1 because assets/com.fanji.mealnote.data.local.AppDatabase/1.json was missing.",
+      "limit": "ZIP inspection only; no Room runtime migration execution. Separate ZIP inspection found zero schema assets in the debug target APK."
+    },
+    {
+      "name": "lintDebug --no-build-cache after migration test changes",
+      "exitCode": 0,
+      "result": "33 actionable tasks: 8 executed, 25 up-to-date; AndroidTest analysis executed; No issues found",
+      "report": "app/build/reports/lint-results-debug.txt"
+    },
+    {
+      "name": "assembleDebug assembleRelease --no-build-cache after migration test changes",
+      "exitCode": 0,
+      "result": "101 actionable tasks: 5 executed, 96 up-to-date; BUILD SUCCESSFUL",
+      "limit": "Debug/Release compile and package, including Release R8, were UP-TO-DATE; no forced release rebuild. Initial invocation failed because PowerShell split the partially quoted -P property; quoting the entire argument resolved task selection."
+    }
+  ]
+}

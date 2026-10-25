@@ -24,6 +24,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import com.fanji.mealnote.ui.formatMealDate
 
 /**
@@ -87,8 +90,9 @@ fun MealDateRow(
  * Photo section with add entries, import progress and thumbnails.
  *
  * [maxCount] is shown in the subtitle and trailing counter.
- * When [canAddPhoto] is false the add entries hide, so users cannot
- * pick photos that could never be saved.
+ * [canAddPhoto] 为 false 时隐藏添加入口；导入进行中也一并隐藏——两次导入并发时
+ * 后完成的一方会覆盖前一次的结果，ViewModel 虽会丢弃后来的请求，但界面不该先让用户
+ * 选完再无声无息地丢掉。
  */
 @Composable
 fun MealPhotoSection(
@@ -126,7 +130,7 @@ fun MealPhotoSection(
             )
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (canAddPhoto) {
+            if (canAddPhoto && !isImporting) {
                 item {
                     GalleryPhotoAction(onClick = onGallery)
                 }
@@ -161,6 +165,19 @@ fun FormErrorLine(
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.error,
         modifier = modifier.fillMaxWidth(),
+    )
+}
+
+/** 保存区常驻失败提示，独立于可滚动表单；显式关闭并让读屏播报。 */
+@Composable
+fun FormErrorBanner(message: String?, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    if (message == null) return
+    MessageBanner(
+        message = message,
+        actionLabel = "知道了",
+        onAction = onDismiss,
+        destructive = true,
+        modifier = modifier.semantics { liveRegion = LiveRegionMode.Polite },
     )
 }
 

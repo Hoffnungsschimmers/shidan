@@ -58,6 +58,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -607,6 +608,9 @@ private val SEGMENT_INSET = 5.dp
  * 外框由本组件自己画（`background` + 动画 `border`），把 TextField 的容器色全部置透明：
  * 这样才能让「聚焦」表现为**描边从 outline 淡到主色并加粗**的连续过渡，
  * 而不是 Material 默认那种瞬间切换的下划线。
+ *
+ * [label] 同时充当输入框的可访问名称（`contentDescription`）：视觉上它在框外，
+ * 但无障碍树里必须挂在输入框本身上，否则读屏用户摸到的只是一个无名编辑框。
  */
 @Composable
 fun MiuixTextField(
@@ -681,7 +685,12 @@ fun MiuixTextField(
             TextField(
                 value = value,
                 onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth(),
+                // 标签是独立的兄弟 Text，输入框本身没有可访问名称，TalkBack 只会读出一个空编辑框。
+                // 这里把 label 补成输入框的描述；刻意不拼接 value —— 本组件也用于密码框，
+                // 描述一旦含值就会绕过视觉遮罩把口令念出来。
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = label },
                 enabled = true,
                 singleLine = singleLine,
                 minLines = minLines,

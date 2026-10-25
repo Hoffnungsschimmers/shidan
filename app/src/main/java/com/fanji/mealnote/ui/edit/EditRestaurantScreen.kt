@@ -188,7 +188,7 @@ fun EditRestaurantScreen(
                     item {
                         MealPhotoSection(
                             title = "封面图",
-                            subtitle = "只保留一张；移除后不会立刻删原图，保存时才结算",
+                            subtitle = "只保留一张；新导入后移除的会立即回收，原封面保存后才结算",
                             photoPaths = uiState.photoPaths,
                             photoDescription = "餐厅封面图片",
                             isImporting = uiState.isImportingPhotos,

@@ -8,15 +8,18 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.PhotoStore
+import com.fanji.mealnote.data.SaveKind
+import com.fanji.mealnote.data.toImportMessage
+import com.fanji.mealnote.data.toSaveMessage
 import com.fanji.mealnote.data.log.AppLog
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
@@ -205,37 +208,29 @@ class EditRestaurantViewModel @Inject constructor(
      * 用户可能随后取消编辑，那时界面还要靠这些文件。详见 [reclaimableFormPhotos]。
      */
     fun onPhotosPicked(uris: List<Uri>) {
-        if (uris.isEmpty()) return
+        if (uris.isEmpty() || !_uiState.beginCoverImport()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isImportingPhotos = true, errorMessage = null) }
-            val (imported, failure) = photoStore.importUrisWithReason(uris.take(1))
-            val newCover = imported.lastOrNull()
-            val obsolete = if (newCover == null) {
-                emptyList()
-            } else {
-                reclaimableFormPhotos(
-                    formPhotoPaths = _uiState.value.photoPaths,
-                    originalCoverPath = _uiState.value.originalCoverPath,
-                    recordPhotoPaths = _uiState.value.recordPhotoPaths,
-                    keep = newCover,
-                )
-            }
-            _uiState.update { state ->
+            try {
+                val (imported, failure) = photoStore.importUrisWithReason(uris.take(1))
+                val newCover = imported.lastOrNull()
                 if (newCover == null) {
-                    state.copy(isImportingPhotos = false, errorMessage = failure.toImportMessage())
+                    _uiState.update { it.copy(errorMessage = failure.toImportMessage()) }
+                    appLog.warn("cover", "import failed failure=$failure count=${uris.size}")
                 } else {
-                    state.copy(
-                        photoPaths = listOf(newCover),
-                        isImportingPhotos = false,
-                        errorMessage = null,
-                    )
+                    val obsolete = _uiState.changeCover(newCover, finishImport = true)
+                    if (obsolete == null) {
+                        reclaimUnusedPhoto(File(newCover))
+                    } else {
+                        photoStore.deleteOwnedPhotos(obsolete)
+                    }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _uiState.update { it.copy(errorMessage = null.toImportMessage()) }
+            } finally {
+                _uiState.update { it.copy(isImportingPhotos = false) }
             }
-            if (newCover == null) {
-                appLog.warn("cover", "import failed failure=$failure count=${uris.size}")
-            }
-            // 状态更新之后再删除文件：先提交状态，避免删除失败时界面与磁盘不一致。
-            if (obsolete.isNotEmpty()) photoStore.deleteOwnedPhotos(obsolete)
         }
     }
 
@@ -243,21 +238,30 @@ class EditRestaurantViewModel @Inject constructor(
 
     /** 拍摄成功：新图成为封面，回收范围同样受 [reclaimableFormPhotos] 约束。 */
     fun onCameraPhoto(file: File) {
-        val state = _uiState.value
-        val obsolete = reclaimableFormPhotos(
-            formPhotoPaths = state.photoPaths,
-            originalCoverPath = state.originalCoverPath,
-            recordPhotoPaths = state.recordPhotoPaths,
-            keep = file.absolutePath,
-        )
-        _uiState.update { it.copy(photoPaths = listOf(file.absolutePath), errorMessage = null) }
-        if (obsolete.isNotEmpty()) {
+        val obsolete = _uiState.changeCover(file.absolutePath)
+        if (obsolete == null) {
+            reclaimUnusedPhoto(file)
+        } else if (obsolete.isNotEmpty()) {
             viewModelScope.launch { photoStore.deleteOwnedPhotos(obsolete) }
         }
     }
 
     fun onCameraCancelled(file: File) {
-        viewModelScope.launch { photoStore.deleteOwnedPhoto(file.absolutePath) }
+        reclaimUnusedPhoto(file)
+    }
+
+    // 迟到或重复的相机/导入回调不能回收当前选中图，它可能已属于保存快照。
+    private fun reclaimUnusedPhoto(file: File) {
+        val state = _uiState.value
+        val reclaimable = reclaimableFormPhotos(
+            formPhotoPaths = listOf(file.absolutePath),
+            originalCoverPath = state.originalCoverPath,
+            recordPhotoPaths = state.recordPhotoPaths + state.photoPaths,
+            keep = "",
+        )
+        if (reclaimable.isNotEmpty()) {
+            viewModelScope.launch { photoStore.deleteOwnedPhotos(reclaimable) }
+        }
     }
 
     /**
@@ -272,52 +276,46 @@ class EditRestaurantViewModel @Inject constructor(
      * @param path 必须来自 [EditRestaurantUiState.recordPhotoPaths]，否则不做任何修改。
      */
     fun useRecordPhotoAsCover(path: String) {
-        val state = _uiState.value
-        if (path !in state.recordPhotoPaths) return
-
-        val obsolete = reclaimableFormPhotos(
-            formPhotoPaths = state.photoPaths,
-            originalCoverPath = state.originalCoverPath,
-            recordPhotoPaths = state.recordPhotoPaths,
-            keep = path,
-        )
-
-        _uiState.update { it.copy(photoPaths = listOf(path), errorMessage = null) }
+        val obsolete = _uiState.changeCover(path, fromRecord = true) ?: return
         if (obsolete.isNotEmpty()) {
             viewModelScope.launch { photoStore.deleteOwnedPhotos(obsolete) }
         }
     }
 
     /**
-     * 移除封面。
+     * 移除封面，并在安全时回收对应文件。
      *
-     * 此处**不删除文件**：该图仍是数据库中记录的封面，用户可能只是暂时不想展示；
-     * 真正的回收发生在保存成功之后（由 [save] 与 Repository 协同完成），
-     * 或页面销毁且未保存时（见 [onCleared]）。
+     * 与早先版本不同，这里**会回收**本次新导入且没有任何数据库行引用的图片：
+     * 用户导入新封面后又移除，文件否则会成为永久孤儿。能否删除仍交给
+     * [reclaimableFormPhotos] 判定——原封面（[EditRestaurantUiState.originalCoverPath]）
+     * 与用餐照片（[EditRestaurantUiState.recordPhotoPaths]）永远保留，取消编辑后还要用它们。
+     *
+     * 移除与保存通过同一状态 CAS 排序：保存先取得快照时拒绝移除；
+     * 移除先完成时，保存快照已不含该图，才允许回收。导入中与已保存同样拒绝变更。
      */
     fun removePhoto(index: Int) {
-        _uiState.update { state ->
-            state.copy(photoPaths = state.photoPaths.filterIndexed { i, _ -> i != index })
+        val reclaimable = _uiState.removeCover(index) ?: return
+        if (reclaimable.isNotEmpty()) {
+            viewModelScope.launch { photoStore.deleteOwnedPhotos(reclaimable) }
         }
     }
 
     /**
      * 提交更新。
      *
-     * 防抖同样是原子状态跃迁：先置 [EditRestaurantUiState.isSaving] 再判断是否被抢先置位，
-     * 避免两次快速点击都通过检查后各启动一个协程。
+     * 防抖采用**原子状态跃迁**（[beginRestaurantSave]）：把「加载中 / 记录不存在 / 保存中 /
+     * 导入图片中 / 已保存」的判断与 `isSaving` 的置位压进同一次 CAS。早先版本用
+     * `updateAndGet` 后再判断 `!snapshot.isSaving`，但 `updateAndGet` 返回的是**写入后**
+     * 的状态——重复点击时 `snapshot.isSaving` 恒为 true，守卫永远不会返回，
+     * 两次点击会各自启动一次更新。
+     *
+     * 拿到 null 表示状态机已忙碌或数据尚不可保存，本次点击直接丢弃；名称为空时
+     * 跃迁只翻起 [EditRestaurantUiState.showNameError] 并返回。
      */
     fun save() {
         val targetId = restaurantId.value ?: return
-        val snapshot = _uiState.updateAndGet { state ->
-            when {
-                state.isLoading || state.notFound || state.isSaving ||
-                    state.isImportingPhotos || state.saved -> state
-                state.name.isBlank() -> state.copy(showNameError = true)
-                else -> state.copy(isSaving = true, errorMessage = null)
-            }
-        }
-        if (!snapshot.isSaving || snapshot.showNameError) return
+        val snapshot = _uiState.beginRestaurantSave() ?: return
+        if (snapshot.showNameError) return
 
         viewModelScope.launch {
             val existing = repository.getRestaurant(targetId)
@@ -337,7 +335,7 @@ class EditRestaurantViewModel @Inject constructor(
 
                 is MealResult.Failure ->
                     _uiState.update {
-                        it.copy(isSaving = false, errorMessage = result.error.toSaveMessage())
+                        it.copy(isSaving = false, errorMessage = result.error.toSaveMessage(SaveKind.RESTAURANT))
                     }
             }
         }
@@ -346,16 +344,20 @@ class EditRestaurantViewModel @Inject constructor(
     /**
      * 页面销毁时回收“新导入但未保存”的图片。
      *
-     * 四种必须跳过清理的情况：
-     * 1. 已保存成功 —— 文件已被数据库引用；
-     * 2. 进程重建 —— 照片仍属于用户正在编辑的表单；
-     * 3. 该路径本就是数据库中的封面（[EditRestaurantUiState.originalCoverPath]）；
-     * 4. 该路径是本店某条用餐记录的照片（[EditRestaurantUiState.recordPhotoPaths]）——
-     *    用户可能把它选成了封面，但那个文件同时也属于一条用餐记录，删掉就破坏了那条记录。
+     * 整体跳过清理的三种情况：
+     * 1. 已保存成功（[EditRestaurantUiState.saved]）—— 文件已被数据库引用；
+     * 2. 保存已开始但结果尚未回写（[EditRestaurantUiState.isSaving]）—— 事务可能已经提交，
+     *    此时删除会让刚写入的记录指向不存在的图片；最坏只是留下孤儿，可由清理入口回收；
+     * 3. 进程重建（[restoredFromSavedState]）—— 照片仍属于用户正在编辑的表单。
+     *
+     * 通过上面的整体判断后，逐张还会排除：
+     * - 该路径本就是数据库中的封面（[EditRestaurantUiState.originalCoverPath]）；
+     * - 该路径是本店某条用餐记录的照片（[EditRestaurantUiState.recordPhotoPaths]）——
+     *   用户可能把它选成了封面，但那个文件同时也属于一条用餐记录，删掉就破坏了那条记录。
      */
     override fun onCleared() {
         val state = _uiState.value
-        if (!state.saved && !restoredFromSavedState) {
+        if (!state.isSaving && !state.saved && !restoredFromSavedState) {
             val reclaimable = reclaimableFormPhotos(
                 formPhotoPaths = state.photoPaths,
                 originalCoverPath = state.originalCoverPath,
@@ -367,24 +369,10 @@ class EditRestaurantViewModel @Inject constructor(
         super.onCleared()
     }
 
-    private fun MealError.toSaveMessage(): String = when (this) {
-        MealError.RestaurantNotFound -> "该餐厅记录已不存在，请返回列表后重试"
-        is MealError.InvalidInput -> reason
-        MealError.StorageFull -> "存储空间不足，请清理后重试"
-        MealError.PhotoIoFailure -> "图片保存失败，请重新选择图片"
-        else -> "餐厅记录保存失败，请稍后重试"
-    }
-
     private companion object {
         const val KEY_RESTAURANT_ID = "edit_restaurant_id"
         const val KEY_NAME = "edit_restaurant_name"
         const val KEY_ADDRESS = "edit_restaurant_address"
         const val KEY_PHOTOS = "edit_restaurant_photos"
     }
-}
-
-/** 导入失败原因的用户文案，见 AddRestaurantViewModel 处的同名函数说明。 */
-private fun PhotoStore.ImportFailure?.toImportMessage(): String = when (this) {
-    PhotoStore.ImportFailure.NOT_AN_IMAGE -> "所选文件不是有效的图片，请换一张重试"
-    else -> "图片导入失败，请重新选择"
 }

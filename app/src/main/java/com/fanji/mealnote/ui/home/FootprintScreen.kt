@@ -55,6 +55,7 @@ import com.fanji.mealnote.ui.components.AnimatedCounter
 import com.fanji.mealnote.ui.components.EmptyStateBlock
 import com.fanji.mealnote.ui.components.LoadingBlock
 import com.fanji.mealnote.ui.components.MealSearchField
+import com.fanji.mealnote.ui.components.MessageBanner
 import com.fanji.mealnote.ui.components.MiuixCard
 import com.fanji.mealnote.ui.components.MiuixSegmented
 import com.fanji.mealnote.ui.components.PageHeader
@@ -163,6 +164,27 @@ fun FootprintScreen(
                     onShareYear = { year ->
                         shareYear = uiState.yearReviews.firstOrNull { it.year == year }
                     },
+                )
+            }
+        }
+
+        // 分享失败必须可见且不自动消失：放在导航栏之上、整块错误色，用户点「知道了」才关闭。
+        // 额外抬高 72dp 是为了避开右下角的「记录」悬浮按钮，提示条不能压在它身上。
+        uiState.shareError?.let { message ->
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(
+                        start = 20.dp,
+                        end = 20.dp,
+                        bottom = MainContentBottomPadding + 72.dp,
+                    ),
+            ) {
+                MessageBanner(
+                    message = message,
+                    destructive = true,
+                    actionLabel = "知道了",
+                    onAction = viewModel::consumeShareError,
                 )
             }
         }
@@ -300,7 +322,7 @@ private fun MonthHeader(section: FootprintSection) {
     val ledger = section.entries.ledgerSumOrNull()
     val summary = buildString {
         append("$count 次")
-        if (ledger != null) append(" · ¥${ledger.formatLedgerAmount()}")
+        if (ledger != null) append(" · ${ledger.formatLedgerAmount()}")
     }
     Row(
         modifier = Modifier
@@ -412,7 +434,7 @@ private fun YearlySummaryCard(summaries: List<YearSummary>, onShareYear: (Int) -
         summaries.forEachIndexed { index, summary ->
             if (index > 0) Spacer(Modifier.height(12.dp))
             val amountText = when {
-                summary.ledgerMinor != null -> "¥${summary.ledgerMinor.formatLedgerAmount()}"
+                summary.ledgerMinor != null -> summary.ledgerMinor.formatLedgerAmount()
                 summary.estimatedYuan != null -> "约${summary.estimatedYuan.formatEstimatedAmount()}"
                 else -> null
             }
@@ -660,7 +682,9 @@ private fun TopRestaurantsCard(
     ranks: List<RestaurantRank>,
     onOpenRestaurant: (Long) -> Unit,
 ) {
-    val peak = ranks.firstOrNull()?.count ?: 1
+    // 次数至少为 1：排行榜里的次数本应 >= 1，但若上游口径变化给出 0，
+    // 除以 0 会让比例条直接崩溃（NaN/inf 在 Compose 里表现为布局异常）。
+    val peak = (ranks.firstOrNull()?.count ?: 1).coerceAtLeast(1)
     MiuixCard(
         modifier = Modifier.fillMaxWidth(),
         elevation = 2.dp,
@@ -819,8 +843,8 @@ private fun BudgetProgressBlock(progress: BudgetProgress) {
     }
     Column(
         modifier = Modifier.clearAndSetSemantics {
-            contentDescription = "本月预算 ¥${progress.budgetMinor.formatLedgerAmount()}，" +
-                "已花 ¥${progress.spentMinor.formatLedgerAmount()}，$statusText"
+            contentDescription = "本月预算 ${progress.budgetMinor.formatLedgerAmount()}，" +
+                "已花 ${progress.spentMinor.formatLedgerAmount()}，$statusText"
         },
     ) {
         Row(
@@ -970,7 +994,9 @@ private fun TopSpendCard(
     spends: List<RestaurantSpend>,
     onOpenRestaurant: (Long) -> Unit,
 ) {
-    val peak = spends.firstOrNull()?.amountMinor ?: 1L
+    // 金额峰值至少为 1 分：入账金额理论上 > 0，但一旦出现 0（脏数据/口径变化），
+    // `toFloat() / 0` 会得到 NaN/Infinity，比例条宽度失效。
+    val peak = (spends.firstOrNull()?.amountMinor ?: 1L).coerceAtLeast(1L)
     MiuixCard(
         modifier = Modifier.fillMaxWidth(),
         elevation = 2.dp,

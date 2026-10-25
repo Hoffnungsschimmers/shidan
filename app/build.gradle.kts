@@ -82,6 +82,9 @@ android {
         arg("room.incremental", "true")
     }
 
+    // MigrationTestHelper 从测试 APK 的 assets/<数据库类名>/<版本>.json 读取历史 schema。
+    sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"

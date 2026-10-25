@@ -27,6 +27,7 @@ import java.math.RoundingMode
  * 数字紧跟单位（积分/分钟）会被当成金额——真实输入里极为罕见。
  *
  * 计算全程用 [BigDecimal]，`×100` 后 `HALF_UP` 取整到分，避免浮点误差进账本。
+ * 任何输入都只返回 `Long?`，**不抛异常**——表单自动识别在输入过程中调用，抛异常即页面崩溃。
  */
 internal fun parseLedgerAmountMinor(text: String, personCount: Int): Long? {
     val cleaned = text.replace(THOUSAND_SEPARATOR_PATTERN, "")
@@ -68,17 +69,33 @@ private fun allNumbers(text: String): List<BigDecimal> {
         .toList()
 }
 
-/** 整桌总额（元）→ 分。上限 100 万元（1 亿分）以上视为误匹配返回 null。 */
+/**
+ * 整桌总额（元）→ 分。超出 `1..MAX_LEDGER_MINOR` 视为误匹配返回 null。
+ *
+ * **绝不抛异常**：必须先在 [BigDecimal] 域判上下界，再 `longValueExact()` 窄化。
+ * 反过来写的话，19 位以上的数字（手机号、订单号粘进来）在 `longValueExact()`
+ * 直接就抛 `ArithmeticException`，根本走不到范围判断——而调用方（表单自动识别）
+ * 没有任何 try/catch，一抛就是整页崩溃。
+ */
 private fun toMinorUnits(total: BigDecimal): Long? {
     val cents = total.multiply(HUNDRED)
         .setScale(0, RoundingMode.HALF_UP)
-    return cents.longValueExact().takeIf { it in 1..MAX_LEDGER_MINOR }
+    if (cents < BigDecimal.ONE || cents > MAX_LEDGER_MINOR_DECIMAL) return null
+    return cents.longValueExact()
 }
 
 private val HUNDRED = BigDecimal(100)
 
-/** 分上限：¥1,000,000。超过基本是误匹配（手机号、订单号粘进来了）。 */
-private const val MAX_LEDGER_MINOR = 100_000_000L
+/**
+ * 分上限：¥1,000,000。超过基本是误匹配（手机号、订单号粘进来了）。
+ *
+ * `internal` 是给手动输入路径（`AmountLedgerSection.parseDraftToMinor`）共用的，
+ * 两种入口必须同一上限，否则自动识别拒绝的金额手动却能存进去。
+ */
+internal const val MAX_LEDGER_MINOR = 100_000_000L
+
+/** [MAX_LEDGER_MINOR] 的 [BigDecimal] 形态，用于窄化到 Long 之前的范围比较。 */
+private val MAX_LEDGER_MINOR_DECIMAL = BigDecimal.valueOf(MAX_LEDGER_MINOR)
 
 /** 千分位逗号：只在「数字 + 逗号 + 三位数字」处移除（与 Formatters 中同一规则）。 */
 private val THOUSAND_SEPARATOR_PATTERN = Regex("""(?<=\d),(?=\d{3})""")

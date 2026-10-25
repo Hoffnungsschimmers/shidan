@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-22",
+  "scope": "F01/F02 data protection only; current working tree preserved",
+  "branch": "main",
+  "versionUnchanged": { "versionCode": 17, "versionName": "0.6.1", "databaseVersion": 4 },
+  "changes": [
+    "Production edit-restaurant save, cover change, removal and import share atomic state transitions; saving/saved cover changes are refused",
+    "Production BackupStore.restore uses executeRestore: all copies must succeed before replacement",
+    "Imported restore files are reclaimed only through MealRepository.deleteUnreferencedFiles, including post-commit failure/cancellation",
+    "PhotoStore.importFile rethrows cancellation and validates owned canonical paths when removing partial copies"
+  ],
+  "checks": {
+    "jvmScript": { "exitCode": 0, "classes": 31, "tests": 299, "result": "OK (299 tests)" },
+    "nativeJvm": { "exitCode": 0, "suites": 31, "tests": 299, "failures": 0, "errors": 0, "skipped": 0 },
+    "regressionCounts": { "EditRestaurantTransitionsTest": 12, "RestoreExecutorTest": 21 },
+    "lintDebug": { "exitCode": 0, "result": "No issues found", "executedTasks": 7, "upToDateTasks": 26 },
+    "androidTestCompilation": "PASS: Kotlin compilation; no device execution",
+    "debugReleaseBuild": { "exitCode": 0, "executedTasks": 21, "upToDateTasks": 80, "result": "Release Kotlin compilation, R8 and package actually executed; Debug packaged; no apk/ delivery replaced" },
+    "migrationAssets": { "exitCode": 0, "schemaVersions": [1, 2, 3, 4], "result": "Each appears exactly once in test APK with SHA-256 equal to source" },
+    "releaseSignature": { "exitCode": 0, "v2": true, "signers": 1, "limit": "No old-delivery certificate comparison" },
+    "manualLifecycleReview": "All modified reclamation branches reviewed; no direct-delete fallback after uncertain database commit",
+    "protectedPaths": "No changes in production Migration, schema JSON, dependencies or apk/",
+    "diffCheck": "PASS"
+  },
+  "resolvedValidationIssues": [
+    "First script run passed 297 cases before two final cancellation tests were added; not treated as final 299-case proof",
+    "First native 299-case run had 7 exception-object identity assertion failures due coroutine stacktrace recovery; assertions now check class/message, original causal identity and retained suppressed exceptions; no debug configuration disabled or test skipped",
+    "Temporary XML/source counter corrected parameterized @Test matching and Windows path separators; its failure prevented Gradle invocation through && rather than failing a build"
+  ],
+  "limits": [
+    "Tests call production state transitions/executor with dependency substitutes and real temporary files, not complete ViewModel/Android Room/PhotoStore/SAF end-to-end",
+    "No connected device or emulator; six migration instrumented cases not executed",
+    "No real WebDAV, SAF round-trip, UI, accessibility or performance verification",
+    "F03-F15 and archive missing-image accounting remain outside this batch"
+  ],
+  "commit": false,
+  "push": false
+}

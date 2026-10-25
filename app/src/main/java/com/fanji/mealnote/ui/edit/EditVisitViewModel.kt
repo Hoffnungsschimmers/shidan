@@ -9,19 +9,26 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.PhotoStore
-import com.fanji.mealnote.data.detectPersonCount
+import com.fanji.mealnote.data.SaveKind
+import com.fanji.mealnote.data.toImportMessage
+import com.fanji.mealnote.data.toSaveMessage
+import com.fanji.mealnote.ui.visit.personCountForPrice
+import com.fanji.mealnote.ui.visit.photoImportFeedback
+import com.fanji.mealnote.ui.visit.acceptEditVisitPhoto
+import com.fanji.mealnote.ui.visit.removeEditVisitPhoto
 import com.fanji.mealnote.data.log.AppLog
 import com.fanji.mealnote.data.local.Verdict
 import com.fanji.mealnote.data.parseLedgerAmountMinor
+import com.fanji.mealnote.ui.tryTransition
 import com.fanji.mealnote.ui.visit.MAX_VISIT_PHOTOS
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
@@ -173,31 +180,7 @@ class EditVisitViewModel @Inject constructor(
         // 空表单写回 handle，此后该判断恒为 true，导致正常进入编辑页也走
         // “保留用户输入”分支，表单永远是空白。
         _uiState.update { state ->
-            if (restoredFromSavedState) {
-                state.copy(
-                    isLoading = false,
-                    restaurantName = restaurantName,
-                    originalPhotoPaths = orderedPaths,
-                )
-            } else {
-                state.copy(
-                    isLoading = false,
-                    restaurantName = restaurantName,
-                    dateMillis = existing.record.eatenAt,
-                    verdict = existing.record.verdict,
-                    dishes = existing.record.dishes,
-                    priceText = existing.record.priceText,
-                    note = existing.record.note,
-                    photoPaths = orderedPaths,
-                    originalPhotoPaths = orderedPaths,
-                    personCount = existing.record.personCount,
-                    // 已落库的人数 > 1 说明当初就是明确填过人数的，不再从文本重新探测。
-                    personCountTouched = existing.record.personCount > 1,
-                    // 已有入账金额按「用户确认过」对待，保留原值；为空则继续自动识别。
-                    amountMinorUnits = existing.record.amountMinorUnits,
-                    amountOverridden = existing.record.amountMinorUnits != null,
-                )
-            }
+            state.applyExistingVisit(existing.record, orderedPaths, restaurantName, restoredFromSavedState)
         }
     }
 
@@ -213,11 +196,7 @@ class EditVisitViewModel @Inject constructor(
     fun onPriceChange(value: String) =
         _uiState.update { state ->
             // 与 AddVisitViewModel.onPriceChange 同一规则：未手改人数时从文本顺带探测人数。
-            val people = if (state.personCountTouched) {
-                state.personCount
-            } else {
-                detectPersonCount(value) ?: 1
-            }
+            val people = personCountForPrice(value, state.personCount, state.personCountTouched)
             state.copy(priceText = value, personCount = people, errorMessage = null)
         }
 
@@ -247,25 +226,31 @@ class EditVisitViewModel @Inject constructor(
     fun onNoteChange(value: String) =
         _uiState.update { it.copy(note = value, errorMessage = null) }
 
+    fun dismissError() = _uiState.update { it.copy(errorMessage = null) }
+
     fun onPhotosPicked(uris: List<Uri>) {
         if (uris.isEmpty()) return
+        val snapshot = _uiState.tryTransition { state ->
+            if (!state.canSave || !state.canAddPhoto) null
+            else state.copy(isImportingPhotos = true, errorMessage = null)
+        } ?: return
+        val attempted = uris.take(MAX_VISIT_PHOTOS - snapshot.photoPaths.size)
         viewModelScope.launch {
-            _uiState.update { it.copy(isImportingPhotos = true, errorMessage = null) }
-            val remaining = (MAX_VISIT_PHOTOS - _uiState.value.photoPaths.size).coerceAtLeast(0)
-            if (remaining == 0) {
-                _uiState.update { it.copy(isImportingPhotos = false, errorMessage = PHOTO_LIMIT_REACHED) }
-                return@launch
-            }
-            val (imported, failure) = photoStore.importUrisWithReason(uris.take(remaining))
-            _uiState.update { state ->
-                state.copy(
-                    photoPaths = (state.photoPaths + imported).distinct().take(MAX_VISIT_PHOTOS),
-                    isImportingPhotos = false,
-                    errorMessage = if (imported.isEmpty()) failure.toImportMessage() else null,
-                )
-            }
-            if (imported.isEmpty()) {
-                appLog.warn("visit", "import failed failure=$failure count=${uris.size}")
+            try {
+                val (imported, failure) = photoStore.importUrisWithReason(attempted)
+                _uiState.update { state ->
+                    state.copy(
+                        photoPaths = (state.photoPaths + imported).distinct().take(MAX_VISIT_PHOTOS),
+                        errorMessage = photoImportFeedback(uris.size, attempted.size, imported.size, failure),
+                    )
+                }
+                if (failure != null) appLog.warn("visit", "import failed failure=$failure count=${attempted.size}")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _uiState.update { it.copy(errorMessage = null.toImportMessage()) }
+            } finally {
+                _uiState.update { it.copy(isImportingPhotos = false) }
             }
         }
     }
@@ -273,21 +258,31 @@ class EditVisitViewModel @Inject constructor(
     fun createCameraTarget(): Pair<File, Uri> = photoStore.createCameraTarget()
 
     fun onCameraPhoto(file: File) {
-        if (_uiState.value.photoPaths.size >= MAX_VISIT_PHOTOS) {
-            viewModelScope.launch { photoStore.deleteOwnedPhoto(file.absolutePath) }
-            _uiState.update { it.copy(errorMessage = PHOTO_LIMIT_REACHED) }
-            return
-        }
-        _uiState.update { state ->
-            state.copy(
-                photoPaths = (state.photoPaths + file.absolutePath).distinct().take(MAX_VISIT_PHOTOS),
-                errorMessage = null,
-            )
+        if (!_uiState.acceptEditVisitPhoto(file.absolutePath)) {
+            reclaimUnusedPhoto(file.absolutePath)
+            _uiState.update { state ->
+                if (state.canSave && !state.canAddPhoto) state.copy(errorMessage = PHOTO_LIMIT_REACHED)
+                else state
+            }
         }
     }
 
-    fun onCameraCancelled(file: File) {
-        viewModelScope.launch { photoStore.deleteOwnedPhoto(file.absolutePath) }
+    fun onCameraCancelled(file: File) = reclaimUnusedPhoto(file.absolutePath)
+
+    private fun reclaimUnusedPhoto(path: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteUnreferencedFiles(listOf(path)) { candidate ->
+                    val state = _uiState.value
+                    candidate in state.photoPaths || candidate in state.originalPhotoPaths
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // 引用查询失败宁可保留文件；不能退回直接删除。
+                _uiState.update { it.copy(errorMessage = "未使用图片暂未清理，可稍后在存储管理中重试") }
+            }
+        }
     }
 
     /**
@@ -295,27 +290,34 @@ class EditVisitViewModel @Inject constructor(
      *
      * 只删除“本次新导入”的文件：已落库照片的磁盘回收统一由 Repository 在事务提交后
      * 处理，此处提前删除会让“取消编辑”无法还原。
+     *
+     * 导入、加载或保存期间拒绝移除；原子移除后，原照片及数据库仍引用的文件一律保留。
      */
     fun removePhoto(index: Int) {
-        val state = _uiState.value
-        val path = state.photoPaths.getOrNull(index) ?: return
-        _uiState.update { it.copy(photoPaths = it.photoPaths.filterIndexed { i, _ -> i != index }) }
-        if (path !in state.originalPhotoPaths) {
-            viewModelScope.launch { photoStore.deleteOwnedPhoto(path) }
-        }
+        val path = _uiState.removeEditVisitPhoto(index) ?: return
+        reclaimUnusedPhoto(path)
     }
 
+    /**
+     * 提交保存。
+     *
+     * 同一时刻只允许一次保存：用 [tryTransition] 原子地完成「检查 + 置位」，
+     * 只有真正跃迁到保存中的调用拿到快照，其余并发调用拿到 null 直接返回。
+     * 早先的 `updateAndGet` + `if (!snapshot.isSaving) return` 是无效守卫——
+     * 返回值是写入后的状态，`isSaving` 恒为 true，两次点击会各写一次数据库。
+     *
+     * 加载中、记录不存在、正在导入图片与已保存四种状态一律不允许发起保存，
+     * 避免把空白表单或失效 id 写进库。
+     */
     fun save() {
         val targetId = recordId.value ?: return
-        val snapshot = _uiState.updateAndGet { state ->
+        val snapshot = _uiState.tryTransition { state ->
             when {
                 state.isLoading || state.notFound || state.isSaving ||
-                    state.isImportingPhotos || state.saved -> state
+                    state.isImportingPhotos || state.saved -> null
                 else -> state.copy(isSaving = true, errorMessage = null)
             }
-        }
-        // 被抢先置位或已保存时 updateAndGet 会返回原状态，isSaving 仍为 false。
-        if (!snapshot.isSaving) return
+        } ?: return
 
         viewModelScope.launch {
             when (val result = repository.updateDiningRecord(
@@ -334,7 +336,7 @@ class EditVisitViewModel @Inject constructor(
 
                 is MealResult.Failure ->
                     _uiState.update {
-                        it.copy(isSaving = false, errorMessage = result.error.toSaveMessage())
+                        it.copy(isSaving = false, errorMessage = result.error.toSaveMessage(SaveKind.VISIT))
                     }
             }
         }
@@ -344,23 +346,16 @@ class EditVisitViewModel @Inject constructor(
      * 页面销毁时回收“本次新导入但未保存”的图片。
      *
      * 已落库照片（[EditVisitUiState.originalPhotoPaths]）不在此列：它们仍被数据库引用，
-     * 用户取消编辑后应完整保留。进程重建时同样跳过，否则用户重建后会看到破图。
+     * 用户取消编辑后应完整保留。保存仍在进行（[EditVisitUiState.isSaving]）时同样跳过：
+     * 事务可能已经提交，只是界面还没收到结果，删文件会让刚更新的记录指向不存在的图片。
+     * 进程重建时也跳过，否则用户重建后会看到破图。
      */
     override fun onCleared() {
         val state = _uiState.value
-        if (!state.saved && !restoredFromSavedState) {
+        if (!state.saved && !state.isSaving && !restoredFromSavedState) {
             photoStore.deleteOwnedPhotos(state.photoPaths.filterNot { it in state.originalPhotoPaths })
         }
         super.onCleared()
-    }
-
-    private fun MealError.toSaveMessage(): String = when (this) {
-        MealError.RecordNotFound -> "该用餐记录已不存在，请返回后重试"
-        MealError.RestaurantNotFound -> "该餐厅记录已不存在，请返回列表后重试"
-        is MealError.InvalidInput -> reason
-        MealError.StorageFull -> "存储空间不足，请清理后重试"
-        MealError.PhotoIoFailure -> "图片保存失败，请重新选择图片"
-        else -> "用餐记录保存失败，请稍后重试"
     }
 
     private companion object {
@@ -377,10 +372,4 @@ class EditVisitViewModel @Inject constructor(
         const val KEY_AMOUNT = "edit_visit_amount"
         const val KEY_AMOUNT_MANUAL = "edit_visit_amount_manual"
     }
-}
-
-/** 导入失败原因的用户文案，见 AddRestaurantViewModel 处的同名函数说明。 */
-private fun PhotoStore.ImportFailure?.toImportMessage(): String = when (this) {
-    PhotoStore.ImportFailure.NOT_AN_IMAGE -> "所选文件不是有效的图片，请换一张重试"
-    else -> "图片导入失败，请重新选择"
 }

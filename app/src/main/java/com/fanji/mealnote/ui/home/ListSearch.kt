@@ -49,27 +49,85 @@ internal fun dishNamesByRestaurant(records: List<DiningRecordEntity>): Map<Long,
 internal fun visitCountsByRestaurant(records: List<DiningRecordEntity>): Map<Long, Int> =
     records.groupingBy { it.restaurantId }.eachCount()
 
+/** 筛选后的店铺与餐品命中解释来自同一次匹配；摘要仅属于当前可见结果。 */
+internal data class ListSearchResult(
+    val restaurants: List<RestaurantEntity>,
+    val dishMatchSummaries: Map<Long, String>,
+)
+
+/** 搜索、状态筛选和排序的生产入口；不改变原有排序规则与餐品索引顺序。 */
+internal fun List<RestaurantEntity>.searchForList(
+    query: String,
+    filter: HomeFilter,
+    dishNames: Map<Long, List<String>>,
+    sort: RestaurantSort,
+): ListSearchResult {
+    val keyword = query.trim()
+    val summaries = mutableMapOf<Long, String>()
+    val restaurants = filter { restaurant ->
+        val match = restaurant.searchMatch(keyword, filter, dishNames[restaurant.id].orEmpty())
+        match?.dishSummary?.let { summaries[restaurant.id] = it }
+        match != null
+    }.sortedForList(sort)
+    return ListSearchResult(restaurants, summaries)
+}
+
 /**
  * 这家店是否同时满足状态筛选与关键字搜索。
  *
- * 关键字按 `trim` 后的原文做子串匹配，**空关键字视为全部匹配**；
- * 英文忽略大小写。[dishNames] 是该店历次记录里填过的餐品名。
+ * [keyword] 为 `trim` 后的原文，空关键字视为全部匹配；英文忽略大小写。
+ * 与可见摘要复用 [searchMatch]，避免「筛选搜到了，解释却用了另一套规则」。
  */
 internal fun RestaurantEntity.matches(
     keyword: String,
     filter: HomeFilter,
     dishNames: List<String>,
-): Boolean {
+): Boolean = searchMatch(keyword, filter, dishNames) != null
+
+private data class ListSearchMatch(val dishSummary: String? = null)
+private val RestaurantOnlyMatch = ListSearchMatch()
+
+private fun RestaurantEntity.searchMatch(
+    keyword: String,
+    filter: HomeFilter,
+    dishNames: List<String>,
+): ListSearchMatch? {
     val matchesStatus = when (filter) {
         HomeFilter.WANT_TO_EAT -> status == RestaurantStatus.WANT_TO_EAT
         HomeFilter.EATEN -> status == RestaurantStatus.EATEN
         HomeFilter.ALL -> true
     }
-    if (!matchesStatus) return false
-    if (keyword.isEmpty()) return true
-    if (name.contains(keyword, ignoreCase = true)) return true
-    if (address.contains(keyword, ignoreCase = true)) return true
-    return dishNames.any { it.contains(keyword, ignoreCase = true) }
+    if (!matchesStatus) return null
+    if (keyword.isEmpty() || name.contains(keyword, ignoreCase = true) ||
+        address.contains(keyword, ignoreCase = true)
+    ) return RestaurantOnlyMatch
+    // 只解释真正命中的第一条餐品记录，店名/地址已经匹配时不展示无关餐品。
+    for (dish in dishNames) {
+        val matchIndex = dish.indexOf(keyword, ignoreCase = true)
+        if (matchIndex >= 0) return ListSearchMatch(dishMatchSummary(dish, matchIndex, keyword))
+    }
+    return null
+}
+
+private val DishSummaryWhitespace = Regex("(?U)\\s+")
+
+/** 有界餐品片段以命中处为中心；UTF-16 下标仅用于定位，截断边界全部按 code point。 */
+private fun dishMatchSummary(dish: String, matchIndex: Int, keyword: String): String {
+    val limit = 40
+    val total = dish.codePointCount(0, dish.length)
+    if (total <= limit) return dish.replace(DishSummaryWhitespace, " ").trim()
+    val matchStart = dish.codePointCount(0, matchIndex)
+    val matchLength = keyword.codePointCount(0, keyword.length)
+    // 预留首尾省略号；长关键字尽量保留其开头，短关键字同时保留前后文。
+    val contentLimit = limit - 2
+    val context = ((contentLimit - matchLength) / 2).coerceAtLeast(0)
+    val start = (matchStart - context).coerceIn(0, total - contentLimit)
+    val end = start + contentLimit
+    val excerpt = dish.substring(
+        dish.offsetByCodePoints(0, start),
+        dish.offsetByCodePoints(0, end),
+    ).replace(DishSummaryWhitespace, " ").trim()
+    return (if (start > 0) "…" else "") + excerpt + (if (end < total) "…" else "")
 }
 
 /**

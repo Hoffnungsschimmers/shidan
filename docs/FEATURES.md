@@ -1,7 +1,7 @@
 # 功能清单(FEATURES)
 
 > 以功能为主线的横切参考,把数据层与界面层串起来。稳定约束见 `AGENTS.md`;分层细节见 `docs/DATA_LAYER.md`、`docs/UI_LAYER.md`。
-> 版本节奏与未来规划以 `ROADMAP.md`(第七节最新)为准。
+> 版本节奏与未来规划以 `ROADMAP.md` **第九节(落地校准)** 与 `OPTIMIZATION_PLAN.md` 为准(前六节版本表已被二者取代)。
 
 ---
 
@@ -13,14 +13,16 @@
 
 **用餐表单字段**(按回忆顺序):三级评价(推荐/尚可/不推荐)→ 日期(默认今天)→ 吃了什么(选填)→ 花费(自由文本,选填)→ 入账金额(自动识别)→ 照片(≤9)→ 补充记录。
 
-**关键约束**:一次记录不新增必填项/弹窗;`AddVisitViewModel` 原子防抖;照片先落盘再入库,取消/失败回收(见第 6 节)。
+**关键约束**:一次记录不新增必填项/弹窗；`AddVisitViewModel` 原子防抖；照片和备注按需展开，已选照片或非空备注不会被隐藏。日期选择器 UTC 自然日与业务本地日双向转换，不平移旧数据。保存后详情显示「已记录这一餐」，可直接编辑新记录或关闭提示。失败在保存区常驻错误色横幅，显式关闭并由读屏播报；部分图片导入分别显示成功、失败与容量截断数量。照片先落盘再入库，取消/失败回收（见第 6 节）。≤20 秒是目标，未做本轮设备计时。
 
 ## 2. 清单(餐厅维度)
 
 - 分段筛选:待探访 / 已用餐 / 全部(`HomeFilter`);搜索覆盖**店名 + 地址 + 餐品名**(不含备注);筛选标签数字基于全量不抖动。
 - **排序(已落地)**:清单工具栏「排序:X」下拉可切 最近更新 / 最近添加 / 按名称(`RestaurantSort`,`ListSortPreference` 持久化)。纯逻辑 `ListSearch.kt#sortedForList`(名称用 `Collator(zh)`,时间相等按 id 兜底稳定)。测试 `RestaurantSortTest`(4)。
 - **去过 N 次(已落地)**:清单里「已用餐」的店卡右侧显示「去过 N 次」。纯逻辑 `ListSearch.kt#visitCountsByRestaurant`(与餐品索引共用同一记录流,不增查询)。测试 `VisitCountsTest`(2)。
-- 「照上次再来一份」:详情页 `latestRecordId` → `AddVisit(copyFrom)`,预填 verdict/dishes/priceText(校验餐厅归属)。
+- **熟店快记**:详情页 `latestRecordId` → `AddVisit(copyFrom)`，校验餐厅归属后只复用餐品；日期、评价、金额、人数、备注、照片不复制。上次花费仅作参考，点击「本次相同，带入花费」才按正常人数/金额规则应用。表单提供最近餐品点选（最近记录优先、去重、最多 8 项），迟到预填不覆盖已经编辑或提交的内容。
+- 餐品命中结果显示有界「餐品匹配」摘要，店名/地址优先命中时不额外显示；清空搜索或记录变化时同步移除旧摘要。
+- 主标签按 `MainTab.name` 保存各页的可保存 UI 状态及列表位置；Room 数据仍实时订阅，未新增导航页。
 - **重复店名提醒(已落地)**:新建店铺输入已存在的店名时,名称卡下方显示非阻塞提示「清单里已经有「X」了」。纯逻辑 `ui/add/DuplicateNameCheck.kt#findDuplicateName`(归一化=去空白+压连续空白+小写;不删内部空格以免误判分店)。**只提醒不拦截**(同名分店合法)。`AddRestaurantViewModel.duplicateName` 由现有列表+当前输入派生。测试 `DuplicateNameCheckTest`(6)。
 - 代码:`HomeViewModel`、`ListSearch.kt`、`WantListScreen.kt`。
 
@@ -37,9 +39,9 @@
 
 **设计原则**:记账是副产品,不给记录流程增加步骤。自由文本 `priceText` 不动,加一层结构化金额 `amountMinorUnits`(整数分,可空)。
 
-- **录入**:花费框保持自由文本;失焦/保存时 `parseLedgerAmountMinor(text, personCount)` 自动识别预填;表单下方「金额确认条」(`AmountLedgerSection`),识别错点一下改,识别不出手动输入。三态:自动识别 → 手动覆盖(`amountOverridden`)→ 恢复自动。
+- **录入**:花费框保持自由文本；`effectiveAmountMinor` 随文本/人数派生。新增页折叠编辑器时仍展示 `AmountLedgerSummary`，明确金额或「未入账」及整桌口径（不等于个人实际支付）；点开 `AmountLedgerSection` 调整人数/金额。三态：自动识别 → 指定/保留当前金额(`amountOverridden`)→ 显式恢复自动。编辑记录保留已落库金额，包括 NULL，修改备注不把旧记录突然计入账本。
 - **金额解析规则**(`AmountText.kt`,测试锁死):去千分位逗号;**仅「人均」是单价需 × 人数,其余数字即整桌总额不乘人数**(「3个人吃了240」→ 24000 分);`BigDecimal` ×100 HALF_UP;上限 ¥100 万;识别不出返回 null(账本宁可缺条目不要错条目)。
-- **账本口径**(`LedgerAggregation.kt`):本月/本年入账、平均每笔、最近 12 月金额柱、花钱最多 Top5(按累计金额)、覆盖说明(N 条已入账 / M 条写文字未入账)。**绝不从估算凑数**;一笔没有返回 `null` 而非 0。
+- **账本口径**(`LedgerAggregation.kt`):本月/本年入账、平均每笔(按**当年**入账计算,与卡片标题年份一致)、最近 12 月金额柱、花钱最多 Top5(按累计金额)、覆盖说明(N 条已入账 / M 条写文字未入账)。**绝不从估算凑数**;一笔没有返回 `null` 而非 0。
 - **餐厅详情累计花费(已落地)**:详情页「用餐记录」小标题在有入账时追加「· 累计 ¥X」。纯逻辑 `ui/detail/DetailStats.kt#totalLedgerMinor`(求和,null≠0)。测试 `DetailStatsTest`(4)。
 - **红线**:金额为空是合法状态(区分「没花钱」与「没记金额」);金额一律整数分;金额禁止进 AppLog。
 - **CSV 导出(已落地)**:设置→备份与恢复→「导出账本 CSV」,经 SAF 写 `text/csv`(无存储权限)。纯逻辑 `data/export/LedgerCsv.kt#buildLedgerCsv`:UTF-8 **BOM**(防 Excel 中文乱码)+ RFC4180 转义(逗号/引号/换行,文本列强制加引号、引号翻倍)+ emoji 代理对靠 UTF-8 保真不截断;列为 日期/店名/地址/评价/餐品/花费原文/入账金额(元)/就餐人数/备注,按用餐时间倒序,孤立记录跳过。框架侧 `LedgerCsvStore`。测试 `CsvExportSafetyTest`(13 例)。
@@ -57,6 +59,7 @@
 
 - 存储:私有目录 `files/photos/`,DB 只存绝对路径;导入经 `PhotoStore`(降采样最长边 2048px,JPEG q88,EXIF 方向校正,文件头魔数校验);相册选择器带降级(`GalleryPicker`)。
 - **生命周期不变式**(最易丢数据,见 `docs/SECURITY_PRIVACY.md` §3):先提交事务再删文件;文件只在无任何 DB 行引用时删(封面与用餐照片可能共享文件);编辑只回收「本次导入且未选中」(`reclaimableFormPhotos`);相机孤儿用 `rememberSaveable` 防护。
+- 用餐表单的图片导入先占位，相机回调/移除与保存竞争同一 CAS；导入或提交期间拒绝变更快照。迟到/重复回调回收前保护当前选择和原照片，并查询数据库全引用，不直接删除已落库共享文件。
 - 查看:全屏 `PhotoViewer`(滑动/双击缩放/拖动平移)。
 - 清理:设置页「清理无用文件」(`cleanupOrphanPhotos`,跳过 10 分钟内新文件)。
 
@@ -69,7 +72,7 @@
 ## 8. 备份与恢复(ZIP)
 
 - **格式**:`mealnote-backup-yyyyMMdd-HHmm.zip` = `manifest.json + restaurants/dining_records/photos.json + photos/<name>.jpg`(`BackupFormat.FORMAT_VERSION=1`)。照片稳定命名 `record{id}_{sortOrder}.jpg`、封面 `cover{restaurantId}.jpg`。
-- **导出/导入**:走 SAF(无存储权限);导入为全量替换单事务;遗留字段不导出;金额空不写键;新增字段用 `optXxx` 读不升版本。
+- **导出/导入**:走 SAF(无存储权限);导入为全量替换单事务;全部暂存图片复制成功才允许替换，任一复制失败中止并安全回收本次未引用新图；取消重抛，提交后失败不能直接删新引用。遗留字段不导出;金额空不写键;新增字段用 `optXxx` 读不升版本。
 - **安全**(`BackupStore.kt`):格式版本校验(拒更高版本)+ 总量 2GB/单条目 32MB/单图 32MB/预检 512MB + 路径穿越阻断 + ZIP 炸弹防护。旧备份无封面导入时忽略封面条目。
 - 代码:`BackupStore.kt`、`SettingsViewModel`(export/requestImport/confirmImport)。
 - **备份新鲜度提示(已落地)**:备份分组标题显示「今天已备份 / N 天前备份 / 从未备份」。成功导出或 WebDAV 上传后记录时间(`BackupStatePreference`);纯逻辑 `backupFreshnessLabel`(按自然日,时钟回拨兜底为今天)。测试 `BackupFreshnessTest`(5)。
@@ -79,7 +82,7 @@
 - 仅 PUT/GET 单文件,上传即覆盖,无版本/增量/自动同步;复用 `BackupStore.export/restore`(下载复用全套导入防护)。
 - 配置(`WebDavPreference`,独立 `mealnote_webdav`):服务器地址(必填)/账号/密码/远端文件名。密码明文存私有目录(界面提示)。
 - **安全**(`WebDavStore.kt`):仅 https(http 限局域网);不自动跟随重定向(防 Basic 凭证外泄);`redactUrlCredentials` 脱敏回显;失败提示常驻可见带回显地址。
-- **连通性检查(已落地)**:设置→服务器同步→「测试连接」对远端文件发 HEAD,归类为 已有备份/尚无备份/账号密码错误/需跳转/连不上 五态并给出可读提示,不改动数据。纯逻辑 `WebDavStore.kt#webDavProbeFor`(状态码→`WebDavProbe`)。测试 `WebDavProbeTest`(5)。真机/真服务器仍需实测(网络无法离线验证)。
+- **连通性检查(已落地)**:设置→服务器同步→「测试连接」对远端文件发 HEAD;文件侧 404 时**再对目录发一次 HEAD**,把结果归为**六态**:已有备份 / 尚无备份 / 目录不存在 / 认证失败 / 需跳转 / 连不上,并给出可读提示,不改动数据。纯映射 `WebDavStore.kt#webDavProbeFor`(状态码→`WebDavProbe`)与 `classifyWebDavProbe(fileCode, collectionCode)`(两次 HEAD 的合并判定,`collectionCode=null` 时完全退化为前者)。测试 `WebDavProbeTest`(9)。真机/真服务器仍需实测(网络无法离线验证)。
 - **红线**(ROADMAP §8):发布前必须在真实服务器跑通一次(v0.4.0 只做单测就发布,用户首用即撞 404)。
 - 代码:`WebDavStore.kt`、`WebDavSection.kt`。
 

@@ -1,0 +1,54 @@
+{
+  "batchStarted": "2026-10-22",
+  "verifiedOn": "2026-10-23",
+  "scope": "熟店快记与金额/日期/返回状态/失败反馈/搜索解释，相关用餐图片保护",
+  "branch": "main",
+  "origin": "https://github.com/Hoffnungsschimmers/shidan.git",
+  "committed": false,
+  "pushed": false,
+  "applicationVersion": { "versionCode": 17, "versionName": "0.6.1", "schemaVersion": 4 },
+  "checks": {
+    "finalGradle": {
+      "tasks": ["testDebugUnitTest", "assembleDebug", "assembleRelease", "assembleDebugAndroidTest"],
+      "projectPath": "C:/Users/2540/mealnote-workspace",
+      "javaInstallationsProperty": "-Porg.gradle.java.installations.paths=D:/env/jdk-17.0.16+8",
+      "flags": ["--console=plain", "--no-build-cache"],
+      "exitCode": 0,
+      "actionableTasks": 143,
+      "executed": 36,
+      "upToDate": 107,
+      "releaseKotlinR8PackageActuallyExecuted": true
+    },
+    "unitTests": {
+      "sourceSuites": 35,
+      "sourceTests": 354,
+      "junitXmlTests": 354,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "scriptFinalRun": "scripts/run-unit-tests.ps1 -NoBuild, after final Gradle compilation",
+      "scriptResult": "OK (354 tests)",
+      "previousFixBatchTests": 299,
+      "netAdditionalTests": 55,
+      "coversFullViewModelsOrRealPhotoStore": false
+    },
+    "lintDebug": { "exitCode": 0, "report": "No issues found." },
+    "migrationAssets": { "schemaVersions": [1, 2, 3, 4], "uniqueEntriesAndSourceSha256Match": true, "instrumentationExecuted": false },
+    "releaseSignature": { "tool": "build-tools/36.0.0/lib/apksigner.jar, JDK17 -Xmx256m", "exitCode": 0, "v2": true, "signers": 1, "comparedWithPreviousDeliveryCertificate": false },
+    "deliveryConsistency": { "sourceTestCountEqualsXml": true, "debugAndReleaseContainNoMigrationSchemaAssets": true, "readmeAndTestIndexUse354": true },
+    "gitDiffCheck": "passed",
+    "protectedPathsDiff": "no changes to app/schemas, production Migration, dependency catalog or apk/",
+    "sensitiveFileNamesInTrackedIndex": "none for checked keystore/env/private-pem/local.properties patterns; not a full secret scan",
+    "adbDevices": "empty"
+  },
+  "apks": {
+    "debug": { "path": "app/build/outputs/apk/debug/app-debug.apk", "bytes": 19369942 },
+    "release": { "path": "app/build/outputs/apk/release/app-release.apk", "bytes": 2144195 }
+  },
+  "remainingLimits": [
+    "No device tests for quick record duration, navigation/state restoration, keyboard, large fonts, TalkBack, or rendered UI.",
+    "Six migration instrumentation cases compiled and assets verified, not executed on a device.",
+    "No real SAF backup round trip or real WebDAV server verification; backup limits/integrity findings outside this batch remain release blockers.",
+    "No universal photo import cancellation cleanup or complete ViewModel/Room end-to-end coverage claim."
+  ]
+}

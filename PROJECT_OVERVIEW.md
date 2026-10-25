@@ -1,8 +1,9 @@
 # 食单 项目总览（PROJECT OVERVIEW）
 
-> 整理日期：2026-09-20 ｜ 最近校准：**2026-10-06**（第二、四、六、十、十二、十四、十五节按工作区实况重写）
+> 整理日期：2026-09-20 ｜ 最近校准：**2026-10-20**（第二、四、九、十、十二、十四、十五节按工作区实况重写；本轮为 v0.6.1 之后的文档打磨，未发版）
 > 本文件是对整个项目的单一入口式概览：定位、现状、结构、架构、数据、约定、已知问题与文档索引。
 > 各主题的权威文档见文末「文档索引」，本文与它们冲突时以对应专题文档为准。
+> 2026-10-22 新增 [工作区评估与发展准备](docs/PROJECT_AUDIT_2026-10-22.md)：本页的 2026-10-20 快照保留作历史记录，当前不足、迁移测试补齐与实际验证边界以该评估及 [执行证据](docs/PROJECT_AUDIT_EVIDENCE_2026-10-22.json) 为准。后续 F01/F02 修复以 [数据保护修复状态](docs/PROJECT_FIX_STATUS_2026-10-22.md) 为准；熟店快记与体验优化见 [快记状态](docs/QUICK_RECORD_STATUS_2026-10-22.md)，当前测试数以 `docs/BUILD_AND_TEST.md` 为准。
 
 ---
 
@@ -27,30 +28,30 @@
 
 ---
 
-## 二、当前状态（2026-10-06 校准）
+## 二、当前状态（2026-10-20 校准）
 
 | 项 | 值 |
 |---|---|
 | 已提交 | **v0.6.1（versionCode 17）**，应用名「食单」（曾用名 饭记 → 味笺） |
-| 工作区 | 本轮整理后**全部入库**（含此前压着的 37 个文件 `+3429 / −1001` 与 ≈30 个未跟踪文件） |
+| 工作区 | v0.6.1 已提交；其上压着一轮**未提交**的打磨改动（代码侧 28 个文件 `+1000 / −444`，另新增 `ui/StateTransitions.kt` 与 `StateTransitionsTest.kt`），只改代码与文档，未发版、未改版本号 |
 | 数据库 | Room version **4**，identityHash `b93fd210509db5642fb4c1aed52f6a14`（v0.6.0 **无 schema 变更**） |
-| 测试 | **28 个 JVM 套件 / 252 例**，2026-10-06 实测全过 + 1 个从未运行过的迁移仪器测试 |
-| 验证门槛 | 单测 / `lintDebug` / `assembleDebug` / `assembleRelease` 全过，`apksigner verify` 退出码 0；已交付 `apk/食单-v0.6.1-{debug,release}.apk`（release 证书与 v0.5.1 / v0.6.0 一致，可覆盖安装） |
+| 测试 | **29 个 JVM 套件 / 266 例**，2026-10-20 实测全过 + 1 个从未运行过的迁移仪器测试 |
+| 验证门槛 | 单测 / `lintDebug` / `assembleDebug` / `assembleRelease` 本轮全过；`apk/` 仍是 v0.6.1 交付包（release 证书与 v0.5.1 / v0.6.0 一致，可覆盖安装），本轮未重新出包、未重跑 `apksigner verify` |
 | 未解锁 | **设备验证**与 WebDAV **真实服务器验证**（AGENTS §5-3）——见第十四节 |
 
 v0.6.0 由三块互相交叠的工作合并而成（ROADMAP 原本拆在 v0.5.2 / v0.6.0 / v0.6.x 三个版本）：
 
 1. **暖食欲 · 图为主视觉重做**（全域，不止清单域）：主色 `#0EA56B`→`#0A8558`（白字对比 3.18→4.66:1）、阴影由冷蓝灰转暖棕、新增 `*Vivid` 与陶土红**纯装饰档**、`ic_launcher` 同步转色；`Type.kt` 补 `headlineSmall`/`titleSmall`（此前 ShareCard 店名静默回落 Roboto）。底色当时改为暖米白，**v0.6.1 又按真机反馈改回纯白 + 暖白卡片**（见第八节）。
-2. **功能批次**：账本 CSV 导出（SAF）、每月预算、清单排序、备份新鲜度、WebDAV 连通性检查、重复店名提醒、年度回顾卡片、单店累计入账。逐项核过接线：都有纯函数 + UI 入口 + 持久化，无孤儿代码；测试从 14 类 / 181 例增至 **28 类 / 252 例**（+71 例，含删除 1 个自证测试）。
-3. **`OPTIMIZATION_PLAN.md` 阶段 0 + 个别 2/3 条目**：WebDAV 凭据排除出系统备份与设备迁移、删除只断言 JDK 自身语义的假测试、测试清单与文档漂移校正、转场弹簧归位、`Type.kt` 补档。该规划的**阶段 1、4、5 仍未开始**。
+2. **功能批次**：账本 CSV 导出（SAF）、每月预算、清单排序、备份新鲜度、WebDAV 连通性检查、重复店名提醒、年度回顾卡片、单店累计入账。逐项核过接线：都有纯函数 + UI 入口 + 持久化，无孤儿代码；测试从 14 类 / 181 例增至 **28 类 / 252 例**（+71 例，含删除 1 个自证测试；打磨轮后为 29 类 / 266 例）。
+3. **`OPTIMIZATION_PLAN.md` 阶段 0 + 个别 2/3 条目**：WebDAV 凭据排除出系统备份与设备迁移、删除只断言 JDK 自身语义的假测试、测试清单与文档漂移校正、转场弹簧归位、`Type.kt` 补档。该规划的**阶段 1、4、5 当时仍未开始**（后续打磨轮只顺手做掉少量条目，见第十四节）。
 
 > ⚠️ v0.6.0 已装到真机跑过首轮（发现上述两个 bug）；**v0.6.1 的修复本身仍未经设备确认**，
 > 纯白底层次感与 6 个二级页的手感需要你再复看一轮。风险清单见第十四节。
 
 ### 代码规模
 
-- 主源码约 **17,200 行** Kotlin（最大文件：`FootprintScreen.kt` 1171 行、`Miuix.kt` 1003 行、`RestaurantDetailScreen.kt` 738 行）。
-- 测试 **28 个类 / 252 个用例**（约 3,200 行），另有 1 个未运行过的迁移仪器测试。
+- 主源码约 **18,068 行** Kotlin（72 个 `.kt` 文件；最大文件：`FootprintScreen.kt` 1224 行、`Miuix.kt` 1016 行、`SettingsScreen.kt` 848 行、`RestaurantDetailScreen.kt` 738 行）。
+- 测试 **29 个类 / 266 个用例**（约 3,232 行），另有 1 个未运行过的迁移仪器测试。
 
 ---
 
@@ -99,6 +100,7 @@ mealnote/
 │     │  └─ ui/
 │     │     ├─ MealNoteApp.kt         NavHost、转场动效、路由表
 │     │     ├─ Formatters.kt          日期/金额/存储量格式化
+│     │     ├─ StateTransitions.kt      `tryTransition`:状态守卫的 CAS 原语
 │     │     ├─ theme/                 Color（暖食欲语义色）、Theme（令牌）、Type
 │     │     ├─ components/            Miuix（通用组件）、Motion、Glass、FluidMotion、
 │     │     │                         GalleryPicker、MealComponents（业务组件）、
@@ -109,8 +111,8 @@ mealnote/
 │     │     │                         ListSearch、FootprintAggregation、LedgerAggregation（纯函数）
 │     │     ├─ add/  visit/           新建店铺（含重复店名提醒 ★）、选店、用餐表单
 │     │     ├─ detail/ edit/          详情（含单店累计入账 ★）、编辑店铺、编辑用餐
-│     │     └─ settings/              设置页、WebDavSection
-│     ├─ test/                        28 个 JVM 单元测试类 / 252 例
+│     │     └─ settings/              设置页（SettingsScreen / SettingsSectionScreen）、SettingsViewModel、WebDavSection
+│     ├─ test/                        29 个 JVM 单元测试类 / 266 例
 │     └─ androidTest/                 AppDatabaseMigrationTest（仪器测试，未运行过）
 ├─ apk/                              历代交付 APK（gitignore，不入库）
 ├─ scripts/run-unit-tests.ps1 ★      全量 JVM 测试（从源码自动发现测试类，清单不会漂移）
@@ -123,7 +125,7 @@ mealnote/
          PROJECT_OVERVIEW / PROJECT_PLAN / HANDOFF(-0.4.0)
 ```
 
-★ = 尚未提交的内容（截至 2026-10-06 为未跟踪文件）。
+★ = v0.6.0 / v0.6.1 新增的功能模块或文件（**均已入库**；不再表示未提交）。
 
 ---
 
@@ -220,7 +222,7 @@ Release 用根目录 `mealnote-release.jks` 自签名（凭据在 `local.propert
 
 | 问题 | 处理 |
 |---|---|
-| `testDebugUnitTest` 曾报所有测试类 `ClassNotFoundException at initializationError` | **2026-10-06 复测未复现**（`--rerun` 强制执行 28 套件 / 252 例全过）。历史记录的原因：AGP 的 `bundleDebugClassesToRuntimeJar` 产物未进测试类路径。首选跑法是 `scripts/run-unit-tests.ps1`（自动发现测试类），README 的 JDK 直跑命令留作复发时的备用路径 |
+| `testDebugUnitTest` 曾报所有测试类 `ClassNotFoundException at initializationError` | **2026-10-06 复测未复现**（28 套件 / 252 例全过），**2026-10-20 打磨轮 29 套件 / 266 例全过**。历史记录的原因：AGP 的 `bundleDebugClassesToRuntimeJar` 产物未进测试类路径。首选跑法是 `scripts/run-unit-tests.ps1`（自动发现测试类），README 的 JDK 直跑命令留作复发时的备用路径 |
 | 找不到 JDK 17 工具链 | 显式传 `-Porg.gradle.java.installations.paths="D:/env/jdk-17.0.16+8"` |
 | 中文路径乱码 | 项目目录已是英文 `Desktop\mealnote`；`C:\Users\2540\mealnote-workspace` 联接**仍在用**（AGENTS §3 的构建命令以它为入口，2026-10-06 实测可用），别当冗余删掉 |
 | build-cache 写入失败（拒绝访问） | 加 `--no-build-cache`，必要时删 `~/.gradle/caches/build-cache-1` |
@@ -234,7 +236,7 @@ Release 用根目录 `mealnote-release.jks` 自签名（凭据在 `local.propert
 
 **本机跑不了应用，单元测试是唯一自动验证手段**，覆盖优先级高。
 
-- **28 个测试套件 / 252 例**（以 `grep -rc "@Test" app/src/test` 为准）。逐类覆盖范围只在
+- **29 个测试套件 / 266 例**（以 `scripts/run-unit-tests.ps1` 从源码发现为准，`grep -rc "@Test" app/src/test` 可复核）。逐类覆盖范围只在
   `docs/BUILD_AND_TEST.md` §6 维护一份，本文不再复制清单——这份清单在 README/文档间各自漂移过至少三次。
 - 跑法首选 `scripts/run-unit-tests.ps1`：**从源码自动发现测试类**，新增类不需要维护清单，
   不可能漂移。README 里的 JDK 直跑命令是备用路径，用它就必须手工同步类清单。
@@ -281,8 +283,9 @@ Release 用根目录 `mealnote-release.jks` 自签名（凭据在 `local.propert
 | **0.5.1**（已提交，versionCode 15） | 随机选店按评价范围（三档 + 待探访开关 + 排除最近 N 天）、清单搜索覆盖餐品名、WebDAV 失败提示可诊断 | v4（未变） |
 | **0.6.0**（versionCode 16，2026-10-06 提交） | 应用改名**食单**；暖食欲视觉全域重做；账本 CSV 导出、每月预算、清单排序、备份新鲜度、WebDAV 连通性检查、重复店名提醒、年度回顾卡片、单店累计入账；优化轮阶段 0 | v4（未变） |
 | **0.6.1**（versionCode 17，2026-10-07） | 真机首轮反馈：修吸顶条滚动发灰（`Color.Transparent` 插值经透明黑）与「统计」页回不去；底色改**纯白 + 暖白卡片 + 1px 描边**；「我的」拆 6 个二级分区页（新路由 `settings/{section}`） | v4（未变） |
+| 未发布（打磨轮，2026-10-20） | 并发守卫改 CAS、表单图片生命周期、设置页共享 ViewModel 与长任务兜底、金额/备份边界加固、日志与无障碍修复；无 schema 变更、无 versionCode/versionName 变动 | v4（未变） |
 
-更早（0.1.x 原型 → 产品重构）见 CHANGELOG「未发布」节：产品由「餐厅资料管理」聚焦为「想吃清单 + 极简评价」，应用更名味笺，重构为两入口模型。
+更早（0.1.x 原型 → 产品重构）见 CHANGELOG 末尾「未发布」节（0.1.x 时期）：产品由「餐厅资料管理」聚焦为「想吃清单 + 极简评价」，应用更名味笺，重构为两入口模型。
 
 ---
 
@@ -304,18 +307,18 @@ Release 用根目录 `mealnote-release.jks` 自签名（凭据在 `local.propert
 
 **验证债（最高优先）**
 
-- 本机无真机/模拟器：暖食欲视觉重做、八个新功能与阶段 0 的全部 UI 改动**都没在设备上跑过**。
-  排版、深色模式、大字体裁字、TalkBack 播报、流畅模式关闭时的降级外观一律未经确认。
+- 本机无真机/模拟器。v0.6.0 **曾装到真机跑过首轮**，抓出两处只有设备才看得见的问题（吸顶条滚动发灰、切到「统计」后回不去）；v0.6.1 的修复本身、「我的」6 个二级页，以及之后打磨轮的全部改动**同样未经设备确认**。深色模式、大字体裁字、TalkBack 播报、流畅模式关闭时的降级外观一律未经确认。
 - WebDAV **手动同步从未在真实服务器上验证过**（v0.4.0 发布即撞上 404 的旧债）。本批新增的
   连通性检查正是为它准备的工具，但同样未经真实服务器验证——AGENTS §5-3 把它列为发布门槛。
 - `MealRepository` 与全部 ViewModel 零测试覆盖；`AppDatabaseMigrationTest` 从未运行。
-- `OPTIMIZATION_PLAN.md` 的阶段 1–5 **基本未动**：`MealError→文案` 仍在 6 个 ViewModel 里各写
+- `OPTIMIZATION_PLAN.md` 的阶段 1–5 **仍未系统推进**：`MealError→文案` 仍在 6 个 ViewModel 里各写
   一份（已出现文案漂移）、`Dimens.kt`/`MealSprings` 未建（硬编码尺寸与散装弹簧参数仍在）、
-  `liveRegion` 全项目 0 处、`FootprintScreen.kt` 仍 1171 行未拆、Migrations 仍在 `di/`。
-  仅少量条目被顺手做掉（`Type.kt` 已补 `headlineSmall`/`titleSmall`，`MealNoteApp` 转场改取
-  `MealMotion`）——**该文档的状态列已落后于工作区，别照它排期**。
+  `liveRegion` 全项目 0 处、`FootprintScreen.kt` 仍 1224 行未拆、Migrations 仍在 `di/`、
+  3 处 `UNCHECKED_CAST` 未消。打磨轮顺手做掉的：`Type.kt` 补档、`MealNoteApp` 转场取 `MealMotion`、
+  `VerdictSelector` 的散装弹簧、设置页 `beginBusy` 统一守卫与 6 个二级分区页（**文件未拆**）——
+  状态列已按 2026-10-20 校准，其余未完成项仍成立。
 
-**仓库与文档状态（2026-10-06 整理后）**
+**仓库与文档状态（2026-10-06 整理，2026-10-20 复核）**
 
 - `AGENTS.md`、`OPTIMIZATION_PLAN.md`、`docs/`（7 个文件）、`scripts/run-unit-tests.ps1` 已入库；
   此前它们只存在于这块磁盘上，与密钥库同属单点故障。
@@ -346,7 +349,7 @@ Release 用根目录 `mealnote-release.jks` 自签名（凭据在 `local.propert
 | `CHANGELOG.md` | 全部版本的权威变更记录（每个版本含验证结果） |
 | `DESIGN_SYSTEM.md` | 视觉与交互规范（**UI 改动以其为准**）：信息架构、术语、色彩、形状、字体、组件、动效、玻璃、图像、无障碍、语义树 |
 | `ROADMAP.md` | 发展规划：记账、评价范围随机筛选、竞品调研、新功能优先级（**§7.3 的节奏已被 `OPTIMIZATION_PLAN.md` 取代**） |
-| `OPTIMIZATION_PLAN.md` | 当前执行清单与验收门（修复打磨轮，不加新功能）；阶段 0 已做完，1–5 未开始，状态列落后于工作区 |
+| `OPTIMIZATION_PLAN.md` | 当前执行清单与验收门（修复打磨轮，不加新功能）；阶段 0 已完成，阶段 1–5 部分条目在打磨轮顺手做掉（状态列已按 2026-10-20 校准） |
 | `docs/` | **代码级模块参考**：`ARCHITECTURE` / `DATA_LAYER` / `UI_LAYER` / `FEATURES` / `BUILD_AND_TEST` / `SECURITY_PRIVACY` |
 | `scripts/run-unit-tests.ps1` | 全量 JVM 测试入口（从源码自动发现测试类，清单不会漂移） |
 | `PROJECT_PLAN.md` | 历史股东项目书（背景、早期路线图、里程碑、风险）；§21 为 2026-09-10 产品方向调整 |

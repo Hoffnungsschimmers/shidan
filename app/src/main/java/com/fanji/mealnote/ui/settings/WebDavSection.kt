@@ -22,9 +22,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fanji.mealnote.data.webdav.WebDavConfig
+import com.fanji.mealnote.data.webdav.redactUrlCredentials
 import com.fanji.mealnote.ui.components.ConfirmDialog
 import com.fanji.mealnote.ui.components.MiuixButton
 import com.fanji.mealnote.ui.components.MiuixButtonStyle
@@ -40,6 +40,7 @@ import com.fanji.mealnote.ui.components.SectionHeader
  *
  * - 未配置时只展示一个“设置同步”入口，点开展开表单，避免占用篇幅；
  * - 已配置时展示地址 + 上传/下载两个动作；修改配置需再次展开表单；
+ *   地址回显前经 [redactUrlCredentials] 洗掉 `user:pass@`，不把写进 URL 的凭据明文上屏；
  * - 下载会覆盖本地全部数据，先弹二次确认框（与手动导入同一语义）。
  *
  * 密码框用密码键盘 + 遮罩显示；保存后表单收起，不在界面上长期展示密码。
@@ -50,7 +51,9 @@ fun WebDavSection(
     onUpload: () -> Unit,
     onDownload: () -> Unit,
     onTest: () -> Unit,
-    viewModel: SettingsViewModel = hiltViewModel(),
+    // 必须由调用方传入设置页共享的那个实例：默认值 hiltViewModel() 会按当前
+    // NavBackStackEntry 另建一份，保存配置后的提示落在无人渲染的实例上。
+    viewModel: SettingsViewModel,
 ) {
     val config by viewModel.webDavConfig.collectAsStateWithLifecycle()
     var expanded by rememberSaveable(config.isConfigured) { mutableStateOf(!config.isConfigured) }
@@ -69,7 +72,10 @@ fun WebDavSection(
             if (!expanded) {
                 MiuixListRow(
                     icon = Icons.Rounded.Sync,
-                    title = if (config.isConfigured) config.serverUrl else "设置同步",
+                    // 回显前洗掉 URL 里的 `user:pass@`：有人习惯把凭据直接写进地址，
+                    // 设置页却是会被旁人一眼看到的界面。脱敏复用 WebDavStore 里那份实现，
+                    // 不在这里再造一套（凭据格式漏判过一次就会重复漏判）。
+                    title = if (config.isConfigured) redactUrlCredentials(config.serverUrl) else "设置同步",
                     subtitle = if (config.isConfigured) {
                         "远端文件：${config.remoteName}，点此修改配置"
                     } else {

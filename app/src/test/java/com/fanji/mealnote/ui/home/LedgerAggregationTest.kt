@@ -160,14 +160,14 @@ class LedgerAggregationTest {
     // ─────────────────────────── 平均每笔 ───────────────────────────
 
     @Test
-    fun `平均每笔只按入账记录求均值`() {
+    fun `平均每笔只按当年入账记录求均值`() {
         val entries = listOf(
             entry(eatenAt = at(2026, 3, 1), amountMinorUnits = 10000),
             entry(eatenAt = at(2026, 3, 2), amountMinorUnits = 20000),
             entry(eatenAt = at(2026, 3, 3), priceText = "忘了", amountMinorUnits = null),
         )
         // (10000 + 20000) / 2 = 15000，未入账那条不拉低均值。
-        assertEquals(15000L, entries.ledgerAverageAmount())
+        assertEquals(15000L, entries.ledgerAverageAmount(2026, shanghai))
     }
 
     @Test
@@ -177,14 +177,28 @@ class LedgerAggregationTest {
             entry(eatenAt = at(2026, 3, 2), amountMinorUnits = 201),
         )
         // (100 + 201) / 2 = 150.5 → 四舍五入 → 151。
-        assertEquals(151L, entries.ledgerAverageAmount())
+        assertEquals(151L, entries.ledgerAverageAmount(2026, shanghai))
     }
 
     @Test
     fun `没有入账记录时平均为 null`() {
         val entries = listOf(entry(eatenAt = at(2026, 3, 1), priceText = "忘了"))
-        assertNull(entries.ledgerAverageAmount())
-        assertNull(emptyList<FootprintEntry>().ledgerAverageAmount())
+        assertNull(entries.ledgerAverageAmount(2026, shanghai))
+        assertNull(emptyList<FootprintEntry>().ledgerAverageAmount(2026, shanghai))
+    }
+
+    @Test
+    fun `跨年记录只计入当年平均`() {
+        val entries = listOf(
+            entry(eatenAt = at(2026, 3, 1), amountMinorUnits = 10000),
+            entry(eatenAt = at(2026, 8, 1), amountMinorUnits = 30000),
+            // 往年的大额记录不能把「今年平均每笔」拉高。
+            entry(eatenAt = at(2025, 3, 1), amountMinorUnits = 900000),
+        )
+        assertEquals(20000L, entries.ledgerAverageAmount(2026, shanghai))
+        assertEquals(900000L, entries.ledgerAverageAmount(2025, shanghai))
+        // 完全没有入账的年份返回 null 而不是 0。
+        assertNull(entries.ledgerAverageAmount(2024, shanghai))
     }
 
     // ─────────────────────────── 花钱最多的店 ───────────────────────────

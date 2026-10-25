@@ -1,9 +1,7 @@
 package com.fanji.mealnote.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +38,9 @@ import com.fanji.mealnote.ui.displayName
  * AddVisit and EditVisit previously each carried an identical copy.
  * Same choice must feel identical in both places, so one component owns
  * the background fade, border reveal and subtle scale.
+ *
+ * 弹簧一律取自 [MealMotion]：颜色与描边用 `settle()` 干净落定，缩放用 `bouncy()`
+ * 保留「按下去有弹性」的手感。这里不再写裸 `spring(...)`，否则又会漂出第五种手感。
  */
 @Composable
 fun VerdictSelector(
@@ -82,22 +83,22 @@ private fun VerdictOption(
     }
     val background by animateColorAsState(
         targetValue = if (selected) container else MaterialTheme.colorScheme.surface,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = MealMotion.settle(),
         label = "verdictBg",
     )
     val foreground by animateColorAsState(
         targetValue = if (selected) contentColor else MaterialTheme.colorScheme.onSurfaceVariant,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = MealMotion.settle(),
         label = "verdictFg",
     )
     val borderColor by animateColorAsState(
         targetValue = if (selected) accent else MaterialTheme.colorScheme.outlineVariant,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = MealMotion.settle(),
         label = "verdictBorder",
     )
     val scale by animateFloatAsState(
         targetValue = if (selected) 1f else 0.97f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        animationSpec = MealMotion.bouncy(),
         label = "verdictScale",
     )
     Box(

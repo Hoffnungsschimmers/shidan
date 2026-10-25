@@ -78,9 +78,14 @@ internal fun List<FootprintEntry>.ledgerMonthlyAmounts(
     }
 }
 
-/** 平均每笔入账金额（分）；没有入账记录时返回 null。 */
-internal fun List<FootprintEntry>.ledgerAverageAmount(): Long? {
-    val amounts = mapNotNull { it.ledgerAmountMinor() }
+/**
+ * [year] 年内平均每笔入账金额（分），按 [zone] 判定归属；该年没有入账记录时返回 null。
+ *
+ * 必须按年统计：这个数字显示在「今年吃饭花了多少」卡里，若混入往年记录，
+ * 用户看到的「平均每笔」就与标题的年份对不上（旧账越多，偏离越大）。
+ */
+internal fun List<FootprintEntry>.ledgerAverageAmount(year: Int, zone: ZoneId): Long? {
+    val amounts = filter { it.isInYear(year, zone) }.mapNotNull { it.ledgerAmountMinor() }
     if (amounts.isEmpty()) return null
     return (amounts.sum() + amounts.size / 2L) / amounts.size // 四舍五入到分
 }

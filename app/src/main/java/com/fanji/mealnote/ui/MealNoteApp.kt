@@ -7,6 +7,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -190,9 +194,21 @@ fun MealNoteApp() {
                 // 直接弹掉这一条，回到用户原本所在的页面。
                 LaunchedEffect(backStackEntry.id) { navController.popBackStack() }
             } else {
+                // 二级页与「我的」父页共用**同一个** SettingsViewModel 实例：把 ViewModel
+                // 作用域显式绑到 [Routes.MAIN] 的返回栈条目，而不是本页自己的条目。
+                // 否则各持一份实例会带来两个真实缺陷：子页导入/清空后父页统计停在旧值；
+                // 长任务进行中返回会连同子页 ViewModel 一起销毁并取消协程，
+                // SAF 目标文件可能只写了半截。
+                // MAIN 理论上一定在栈中（本路由只能从「我的」进入）；万一取不到，
+                // 退回本页条目，行为退化为旧实现而不是崩溃。
+                val settingsOwner = remember {
+                    runCatching { navController.getBackStackEntry(Routes.MAIN) }
+                        .getOrDefault(backStackEntry)
+                }
                 SettingsSectionScreen(
                     section = section,
                     onBack = { navController.popBackStack() },
+                    viewModel = hiltViewModel(settingsOwner),
                 )
             }
         }
@@ -202,8 +218,12 @@ fun MealNoteApp() {
             arguments = listOf(navArgument("restaurantId") { type = NavType.LongType }),
         ) { backStackEntry ->
             val restaurantId = backStackEntry.arguments?.getLong("restaurantId") ?: return@composable
+            val savedRecordId by backStackEntry.savedStateHandle
+                .getStateFlow<Long?>(SAVED_VISIT_KEY, null).collectAsStateWithLifecycle()
             RestaurantDetailScreen(
                 restaurantId = restaurantId,
+                savedRecordId = savedRecordId,
+                onDismissSaved = { backStackEntry.savedStateHandle[SAVED_VISIT_KEY] = null },
                 onBack = { navController.popBackStack() },
                 onAddVisit = { navController.openVisitForm(restaurantId) },
                 onCopyLastVisit = { recordId ->
@@ -230,7 +250,7 @@ fun MealNoteApp() {
                 restaurantId = restaurantId,
                 copyFromRecordId = copyFrom.takeIf { it != Routes.NO_COPY_SOURCE },
                 onBack = { navController.popBackStack() },
-                onSaved = { navController.backToDetail(restaurantId) },
+                onSaved = { recordId -> navController.backToDetail(restaurantId, recordId) },
             )
         }
 
@@ -283,8 +303,11 @@ private fun NavHostController.openVisitForm(
  * 同样清到 [Routes.MAIN]，使详情页成为返回栈中唯一的上层页面 ——
  * 用户看完刚写的记录，再按返回就是清单/足迹，而不是回到已经提交过的表单。
  */
-private fun NavHostController.backToDetail(restaurantId: Long) {
+private fun NavHostController.backToDetail(restaurantId: Long, savedRecordId: Long) {
     navigate(Routes.restaurantDetail(restaurantId)) {
         popUpTo(Routes.MAIN) { inclusive = false }
     }
+    currentBackStackEntry?.savedStateHandle?.set(SAVED_VISIT_KEY, savedRecordId)
 }
+
+private const val SAVED_VISIT_KEY = "saved_visit_record_id"

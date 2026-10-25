@@ -127,6 +127,15 @@ fun SettingsScreen(
     val monthlyBudget by viewModel.monthlyBudget.collectAsStateWithLifecycle()
     val lastBackupAt by viewModel.lastBackupAt.collectAsStateWithLifecycle()
 
+    // 长任务改为跨页存活后，任务可能在用户离开分区页之后才结束：父页同样要呈现
+    // 忙碌与结果，否则「导入/导出失败」在回到「我的」后完全不可见。
+    LaunchedEffect(uiState.message) {
+        if (uiState.message != null) {
+            delay(MESSAGE_DURATION_MS)
+            viewModel.consumeMessage()
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
@@ -176,6 +185,34 @@ fun SettingsScreen(
                 }
             }
         }
+
+        // 忙碌横幅与提示条：与分区页同一套语义（成功自动消失、失败常驻且显式关闭）。
+        if (uiState.isBusy) {
+            item(key = "busy") {
+                MiuixCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = 8.dp,
+                    contentPadding = PaddingValues(16.dp),
+                ) {
+                    Text(uiState.busyLabel.orEmpty(), style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(10.dp))
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            }
+        }
+        uiState.message?.let { message ->
+            item(key = "message") { MessageBanner(message) }
+        }
+        uiState.errorMessage?.let { error ->
+            item(key = "error") {
+                MessageBanner(
+                    message = error,
+                    destructive = true,
+                    actionLabel = "知道了",
+                    onAction = viewModel::consumeError,
+                )
+            }
+        }
     }
 }
 
@@ -205,7 +242,7 @@ private fun SettingsSection.summary(
     }
 
     SettingsSection.LEDGER ->
-        if (monthlyBudgetMinor > 0L) "¥${monthlyBudgetMinor.formatLedgerAmount()} / 月" else "未设置预算"
+        if (monthlyBudgetMinor > 0L) "${monthlyBudgetMinor.formatLedgerAmount()} / 月" else "未设置预算"
 
     SettingsSection.BACKUP -> "$backupLabel · $restaurantCount 家店"
 
@@ -218,8 +255,14 @@ private fun SettingsSection.summary(
 /**
  * 二级分区页。
  *
- * 与「我的」共用 [SettingsViewModel]，但作用域是各自的返回栈条目：SAF 启动器、
- * 忙碌横幅与确认对话框只在真正会触发它们的页面注册。
+ * 与「我的」父页共用**同一个** [SettingsViewModel] 实例：导航层把 ViewModel 的作用域
+ * 绑在「我的」父页的返回栈条目上，而不是本页的条目（详见 `MealNoteApp` 的
+ * `settings/{section}` 路由）。这样做有两个直接好处：
+ * - 子页导入/清空数据后，父页的店铺数与存储占用随共享状态同步刷新，不会停在旧值；
+ * - 长任务（导出、上传等）进行中返回，不会因为本页条目出栈而销毁 ViewModel、
+ *   取消协程，SAF 目标文件也就不会留下半截。
+ *
+ * SAF 启动器、忙碌横幅与确认对话框仍只在本页注册——它们本来就是本页的交互。
  */
 @Composable
 fun SettingsSectionScreen(
@@ -512,7 +555,7 @@ private fun LazyListScope.ledgerSection(
                         "未设置，点此设定后按月对照花费"
                     },
                     trailingText = if (monthlyBudget > 0L) {
-                        "¥${monthlyBudget.formatLedgerAmount()}"
+                        monthlyBudget.formatLedgerAmount()
                     } else {
                         "未设"
                     },
@@ -575,6 +618,7 @@ private fun LazyListScope.backupSection(
 
     item {
         WebDavSection(
+            viewModel = viewModel,
             enabled = !uiState.isBusy,
             onUpload = viewModel::uploadToWebDav,
             onDownload = viewModel::downloadFromWebDav,

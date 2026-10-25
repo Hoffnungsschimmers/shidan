@@ -10,6 +10,7 @@ import androidx.exifinterface.media.ExifInterface
 import com.fanji.mealnote.data.log.AppLog
 import com.fanji.mealnote.data.log.describeForLog
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -117,9 +118,12 @@ class PhotoStore @Inject constructor(
                 created.outputStream().use { output -> input.copyTo(output) }
             }
             created.absolutePath
+        } catch (cancelled: CancellationException) {
+            target?.let { deleteOwnedPhoto(it.absolutePath) }
+            throw cancelled
         } catch (_: Exception) {
             // 复制中途失败会留下半成品文件，必须清理，否则会变成孤儿文件。
-            target?.delete()
+            target?.let { deleteOwnedPhoto(it.absolutePath) }
             null
         }
     }

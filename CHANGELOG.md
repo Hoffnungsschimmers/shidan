@@ -2,6 +2,100 @@
 
 本项目遵循语义化版本思路记录主要变更。
 
+## 未发布（打磨轮）
+
+### 2026-10-22：熟店快记与体验优化
+
+- 详情「熟店快记」仅复用餐品；上次花费先展示参考，用户明确采用后才参与本次金额/人数识别。新增最近餐品点选，迟到预填不覆盖已编辑/提交内容。
+- 新增页金额摘要常显，明确整桌口径与「未入账」；照片/备注按需展开并保留已填内容。编辑已有金额（包括 NULL）保留原值，显式恢复自动才重新识别。
+- 日期选择双向转换 UTC 自然日与本地业务日，不迁移旧记录；清理详情、足迹、我的和年度回顾重复币符。
+- 主标签按稳定 key 保留可保存的页面状态与列表位置；清单餐品搜索显示实际命中摘要，店名/地址优先，文本截断保护 emoji。
+- 保存后的详情确认可直接编辑新记录；用餐表单失败提示常驻保存区，部分导入分别报告成功/失败/容量截断。图片移除和相机回调与提交原子互斥，回收保护原图及数据库引用。
+- 验证过程、结果与未完成的设备/备份发布门槛见 `docs/QUICK_RECORD_STATUS_2026-10-22.md`；不改版本、schema、依赖、权限或 `apk/`，未 commit/push。
+
+### 2026-10-22：数据保护修复（F01 / F02）
+
+- 编辑餐厅的保存、导入占位、相机/用餐照片换封面及移除共用原子状态跃迁。保存中/已保存拒绝换图和移除，不能回收待提交快照引用的图片；迟到或重复回调保留当前封面与数据库来源图片。
+- 恢复时任一暂存图片复制失败，在全量替换之前中止，不再把失败计作跳过后覆盖旧数据。复制完成先登记本次文件再响应取消；失败/取消/成功后的回收统一查询数据库引用，提交后返回失败也不会直接删掉新引用的文件。
+- `PhotoStore.importFile` 重抛取消，半成品清理走 canonical path 守卫。增加生产状态跃迁与恢复执行器的故障/取消/提交后失败回归测试；实际验证结果与平台限制见 `docs/PROJECT_FIX_STATUS_2026-10-22.md`。
+- 不改应用版本、schema、生产 Migration、依赖或 `apk/`，未 commit/push。
+
+### 2026-10-22：评估与迁移测试基础补齐
+
+- 新增 `docs/PROJECT_AUDIT_2026-10-22.md`：以工作区为准梳理架构、可靠性问题、条件风险和下一轮验收；业务问题尚未据此全部修复。
+- 将历史 schema 接入 **androidTest assets**，避免 `MigrationTestHelper` 因缺少 JSON 无法运行；不进入正式应用资产。
+- 迁移仪器测试从 1 例扩至 6 例，覆盖全部单段及跨段路径，验证餐厅/记录/照片关系、文本/日期、已有字段及新增默认值；显式记录历史封面默认值差异。无设备，**未执行六例仪器测试**。
+- 新增 `scripts/check-migration-assets.ps1`，核对测试 APK 每份 schema 恰好一份及 SHA-256 一致；修正“必须先抽 Repository 接口才能测试”与删除撤销仅靠内存路径可恢复图片的过强前提。
+- 无业务实现、schema、生产 Migration、依赖或应用版本变更，不修改 `apk/` 交付包。最终构建/资源检查结果见评估报告与机器可读证据。
+
+v0.6.1 之后的一轮修复，**未发版、未改版本号、无 schema 变更**。目标是修掉「只有并发或异常路径才现形」的静默失效，并把这一轮发现的边界收紧到可测试的纯逻辑里。
+
+### 修复：并发守卫反写，重复提交/重复写库
+
+`updateAndGet` 返回的是**写入之后**的状态，早先 `if (!snapshot.isSaving) return` 形式的守卫因此从来不生效：两次快速点击各自通过检查，各起一个协程写一次库（导出可能写坏同一个文件，保存可能插两条记录）。新增 `ui/StateTransitions.kt#tryTransition`，把「判断 + 置位」压进一次 `compareAndSet`；只有真正完成跃迁的调用拿到新状态，其余拿到 null 提前返回。替换范围：四个表单（新建/编辑餐厅、新建/编辑用餐）、详情页删除与设置页 9 个长任务（导出、导出账本 CSV、导入、清理、清空、日志、测试连接、上传、下载）。
+
+### 修复：表单照片在保存/移除竞态下被误删
+
+- 相册导入与拍照共用一条通道：启动协程前原子占位（`isImportingPhotos` + 比对 `photoPaths` 快照），通道被占用时按取消处理并删除本次目标文件，两条通道不再互相覆盖列表或误删对方的文件；
+- `EditRestaurantViewModel.removePhoto` 现在会回收「本次新导入且没有任何数据库行引用」的图片（仍由 `reclaimableFormPhotos` 判定，原封面与用餐照片无条件保留），消除了导入后移除留下的永久孤儿；
+- 四个表单的 `onCleared` 在 `isSaving` 时整体跳过回收：事务可能已经提交，此时删文件会让刚写入的记录指向不存在的图片；最坏只留下孤儿，可由「清理无用文件」回收。
+- 新建餐厅的封面导入失败时不再删除表单里现有的封面：失败意味着没有发生替换，原文件仍被界面与随后的保存引用；
+- 两个用餐表单的 `removePhoto` 补上已保存判断：保存已提交后仍从列表移除新导入的图片，此前会删掉刚被 `photos` 行引用的文件；
+- 导入进行中隐藏相册/拍照入口（`MealPhotoSection`）：此前第二次选择会被并发通道静默丢弃，用户以为选上了。
+
+### 修复：设置页长任务与作用域
+
+- 9 个长任务统一走 `beginBusy(label)`（内部 CAS），并补异常兜底——此前一次未预料的异常会把 `isBusy` 永久留在 true，所有按钮从此点不动；
+- `settings/{section}` 二级页与「我的」共享**同一个 `SettingsViewModel`**（取 MAIN 回退栈条目的 owner）：长任务进行中离开分区页不再取消协程（SAF 目标文件可能只写半截），分区页导入/清空后父页统计同步刷新。
+- `WebDavSection` 改为必须由调用方传入共享实例：它的默认参数 `hiltViewModel()` 会按分区条目另建一份，保存配置后的提示落在无人渲染的实例上；
+- 「我的」父页补齐忙碌横幅与成功/失败提示条：长任务改为跨页存活后，任务可能在用户离开分区页之后才结束，此前失败回到父页完全不可见。
+
+### 修复：金额解析与手动输入的越界
+
+- `parseLedgerAmountMinor` 与手动金额输入都改为**先在 `BigDecimal` 域判 0.01–¥1,000,000，再 `longValueExact()` 窄化**：19 位以上的数字（粘进来的手机号、订单号）此前会在窄化时直接抛 `ArithmeticException`，而表单自动识别没有 try/catch，一抛就是整页崩溃；
+- 手动金额上限与自动识别统一为同一个 `MAX_LEDGER_MINOR`，提示文案改为「请输入 0.01–1,000,000 之间的金额」；
+- 人数显示由固定 40dp 改为 `widthIn(min=40dp)`，系统大字体下两位数不再被裁掉。
+
+### 加固：备份导入的边界
+
+- ZIP 条目数上限 `MAX_ARCHIVE_ENTRIES=20_000`：累计字节上限挡不住「大量极小条目」，几十万个空条目足以耗尽 inode 并拖死解压；
+- 恢复暂存目录改为 `cacheDir/backup_staging-<uuid>`：SAF 导入与 WebDAV 下载并发恢复时，不再互删对方正在读取的暂存照片；
+- 条目名防御抽为 `internal safePhotoEntryName()`，由 `BackupEntryNameSafetyTest` 直接覆盖，不再只靠间接路径；
+- `replaceAllData` 导入侧校验：丢弃 `id <= 0` 的餐厅/记录/照片、跳过店名规范化后为空的餐厅、店名地址 `trim()`、`dishes`/`priceText`/`note` 入库前 `normalizeText(limit)`。
+- 条目名压平后只剩 `.` / `..` 的直接丢弃（写不出暂存目录，但也没有任何合法用途）；
+- 进程被杀时 `finally` 不会执行，新增按 24 小时阈值清理陈旧 `backup_staging-*` 目录——唯一目录不再靠「下次恢复先清一遍」兜底；
+- 导入成功提示改用 `ReplaceSummary` 的**实际入库行数**，不再把被校验丢弃的行也算进「已恢复」。
+
+### 修复：日志、无障碍与统计口径
+
+- `AppLog` 的截断改为**按 code point**（切点用 `offsetByCodePoints`），emoji 不再被劈成半个；导出时只裁掉「文件尾」与「内存缓冲」重合的那一段，**不再对正文按内容去重**——连点两次产生的相同日志恰恰是「点了几次」的证据；
+- `MiuixTextField` 把 `label` 补成输入框的 `contentDescription`（不拼 value，避免密码框绕过遮罩念出口令）；
+- `VerdictSelector` 的弹簧改取 `MealMotion`，组件内不再写裸 `spring(...)`；
+- WebDAV 地址回显统一经 `redactUrlCredentials()`，写进 URL 的 `user:pass@` 不再上屏；
+- 足迹月份分组改为显式接收时区（`toSections(zone)` / `formatMonthLabel(zone)`），与统计口径一致；
+- 「平均每笔」改为**当年**口径，不再混入往年记录；
+- 两处排行榜比例条补除零保护；清单页的「一共几餐」与餐品索引剔除孤儿记录（所属餐厅已不存在）；
+- 年度回顾分享写盘失败改为常驻错误横幅（整块错误色 + 显式关闭），不再「按了分享没反应」。
+
+### 修复：首选测试入口在 JAVA_HOME 指向 JDK 21 的机器上直接失败
+
+`scripts/run-unit-tests.ps1` 原先只看 `JAVA_HOME` 下有没有 `bin/java.exe`，本机 `JAVA_HOME` 指向 JDK 21 时，
+它把 JDK 21 当作 17 传给 `-Porg.gradle.java.installations.paths`，Gradle 随即报
+`Cannot find a Java installation ... languageVersion=17`；脚本秒退，而输出经管道缓冲，看起来像「一直在跑」。
+现在脚本读取安装目录的 `release` 文件校验 `JAVA_VERSION=17`，不匹配则回退到 `D:\env\jdk-17*`。
+同时补上 `kotlinx-coroutines-core-jvm`：新增的 `StateTransitionsTest` 用到 `MutableStateFlow`，
+它不在 app 的 runtime jar 里，直跑会 `NoClassDefFoundError`。修完后实跑：**从源码发现 29 个类，`OK (266 tests)`**。
+
+### 验证
+
+```
+单元测试：29 套件 / 266 例全过，0 失败 0 错误（新增 StateTransitionsTest 5 例）
+Lint    ：lintDebug 通过，No issues found
+构建    ：assembleDebug / assembleRelease SUCCESS
+```
+
+**限制说清楚**：本轮没有真机/模拟器验证，UI 观感、深色模式、大字体与 TalkBack 均未经确认；WebDAV 真实服务器验证仍未做（AGENTS §5-3）；`AppDatabaseMigrationTest` 仍未运行。本轮无 schema 变更，也未改 versionCode/versionName，未重新出包。
+
 ## 0.6.1（2026-10-07 · 真机首轮反馈修复 + 视觉与「我的」页重构）
 
 v0.6.0 装到手机上跑第一轮，反馈集中在两处 bug 与三处 UI 判断。这一版全部处理。

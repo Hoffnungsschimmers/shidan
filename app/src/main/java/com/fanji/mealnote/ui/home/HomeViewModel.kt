@@ -51,6 +51,8 @@ data class HomeUiState(
      * 而原来卡片上只有「待探访 / 已用餐」,去过 8 次的店和去过 1 次的店长得一样。
      */
     val latestVerdicts: Map<Long, Verdict> = emptyMap(),
+    /** 仅餐品命中的可见店铺摘要；随查询/数据重新派生，不进入保存状态。 */
+    val dishMatchSummaries: Map<Long, String> = emptyMap(),
     val totalCount: Int = 0,
     val wantCount: Int = 0,
     val eatenCount: Int = 0,
@@ -64,7 +66,7 @@ data class HomeUiState(
     /** 数据源本身为空（尚未创建任何记录）。 */
     val isEmpty: Boolean get() = totalCount == 0
 
-    /** 全部用餐记录条数（各店次数之和），hero 的「一共几餐」。 */
+    /** 全部用餐记录条数(各店次数之和,不含所属餐厅已不存在的孤儿记录),hero 的「一共几餐」。 */
     val totalVisitCount: Int get() = visitCounts.values.sum()
 }
 
@@ -82,6 +84,10 @@ class HomeViewModel @Inject constructor(
      *
      * 这些只依赖数据库数据与随机设置,放在**不含 [_query]/[_filter]** 的上游 combine 里。
      * 搜索时每敲一个字只重新过滤店铺列表,不再重算随机池与餐品名索引——记录多时这是搜索卡顿的来源。
+     *
+     * 所有按记录聚合的字段（次数、餐品名、最近评价、随机池）都基于**现存餐厅**的记录：
+     * 导入备份包不保证外键一致，可能留下所属餐厅已不存在的孤儿记录，它们既无处展示，
+     * 也不该被计入「一共几餐」。足迹页同样按现存餐厅过滤，两页口径必须一致。
      */
     private data class HomeData(
         val restaurants: List<RestaurantEntity>,
@@ -104,13 +110,17 @@ class HomeViewModel @Inject constructor(
         // 让池子自相矛盾，也让纯函数本身可在测试里固定到任意日期。
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now(zone)
+        // 先剔除孤儿记录：所属餐厅已不存在（级联删除本应避免，但导入的备份包不保证一致）。
+        // 之后的次数、餐品索引、最近评价与随机池全部基于同一份过滤结果，口径一致。
+        val restaurantIds = restaurants.mapTo(HashSet(restaurants.size)) { it.id }
+        val visibleRecords = records.filter { it.restaurantId in restaurantIds }
         // 随机池与卡片上的「最近评价」共用这一份归并结果，不再各算一遍。
-        val latestVisits = latestVisitByRestaurant(records)
+        val latestVisits = latestVisitByRestaurant(visibleRecords)
         HomeData(
             restaurants = restaurants,
             // 餐品名与随机池用的是同一条记录流，这次扩展没有增加任何数据库查询。
-            dishNames = dishNamesByRestaurant(records),
-            visitCounts = visitCountsByRestaurant(records),
+            dishNames = dishNamesByRestaurant(visibleRecords),
+            visitCounts = visitCountsByRestaurant(visibleRecords),
             latestVerdicts = latestVisits.mapValues { it.value.verdict },
             totalCount = restaurants.size,
             wantCount = restaurants.count { it.status == RestaurantStatus.WANT_TO_EAT },
@@ -132,11 +142,10 @@ class HomeViewModel @Inject constructor(
         _filter,
         listSortPreference.sort,
     ) { d, query, filter, sort ->
-        val keyword = query.trim()
+        val search = d.restaurants.searchForList(query, filter, d.dishNames, sort)
         HomeUiState(
-            restaurants = d.restaurants
-                .filter { it.matches(keyword, filter, d.dishNames[it.id].orEmpty()) }
-                .sortedForList(sort),
+            restaurants = search.restaurants,
+            dishMatchSummaries = search.dishMatchSummaries,
             query = query,
             filter = filter,
             sortMode = sort,

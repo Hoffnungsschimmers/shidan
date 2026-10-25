@@ -132,7 +132,7 @@ fun YearReviewSheet(
 @Composable
 private fun YearReviewContent(data: YearReviewCardData) {
     val spendText: String? = when {
-        data.ledgerMinor != null -> "花了 ¥${data.ledgerMinor.formatLedgerAmount()}"
+        data.ledgerMinor != null -> "花了 ${data.ledgerMinor.formatLedgerAmount()}"
         data.estimatedYuan != null -> "约花了 ${data.estimatedYuan.formatEstimatedAmount()}"
         else -> null
     }

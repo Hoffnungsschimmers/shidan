@@ -106,7 +106,7 @@ data class FootprintUiState(
     val ledgerSpendThisYear: Long? = null,
     /** 本月的入账总额（分）；同上。 */
     val ledgerSpendThisMonth: Long? = null,
-    /** 平均每笔入账金额（分）；无入账记录时为 `null`。 */
+    /** 今年的平均每笔入账金额（分）；该年无入账记录时为 `null`（与卡片标题的年份一致）。 */
     val ledgerAverageAmount: Long? = null,
     /** 最近 12 个月的入账金额，从最早到最新。 */
     val ledgerMonthlyAmounts: List<MonthlyAmount> = emptyList(),
@@ -122,6 +122,8 @@ data class FootprintUiState(
     val yearReviews: List<com.fanji.mealnote.ui.components.YearReviewCardData> = emptyList(),
     /** 时间线的评价筛选(仅影响时间线,不影响统计)。 */
     val verdictFilter: VerdictFilter = VerdictFilter.ALL,
+    /** 年度回顾分享失败的提示;用户关闭前一直显示(失败必须可见,不自动消失)。 */
+    val shareError: String? = null,
 ) {
     /** 用户输入了关键字但没有任何匹配。 */
     val isSearchMiss: Boolean get() = query.isNotBlank() && sections.isEmpty()
@@ -152,6 +154,9 @@ class FootprintViewModel @Inject constructor(
     private val _pendingShareUri = MutableStateFlow<Uri?>(null)
     val pendingShareUri: StateFlow<Uri?> = _pendingShareUri.asStateFlow()
 
+    /** 年度回顾分享失败提示;界面消费后调用 [consumeShareError] 复位。 */
+    private val _shareError = MutableStateFlow<String?>(null)
+
     /**
      * 全量条目 + 已算好的统计。
      *
@@ -162,6 +167,8 @@ class FootprintViewModel @Inject constructor(
     private data class FootprintData(
         val all: List<FootprintEntry>,
         val base: FootprintUiState,
+        /** 计算这些统计所用的时区;下游的时间线分组必须沿用同一个时区。 */
+        val zone: ZoneId,
     )
 
     private val data: kotlinx.coroutines.flow.Flow<FootprintData> = combine(
@@ -187,8 +194,9 @@ class FootprintViewModel @Inject constructor(
 
         // 时钟与时区在这里读取一次并向下传递，聚合逻辑本身保持纯函数（见 FootprintAggregation.kt）。
         // 每次数据变化都重新读时钟，因此应用跨年驻留后台后统计会自动切到新年度。
-        val today = YearMonth.now()
+        // today 显式用同一个 zone 求值：两者若各读一次系统默认时区，理论上可能落在不同月份。
         val zone = ZoneId.systemDefault()
+        val today = YearMonth.now(zone)
         val currentYear = today.year
 
         FootprintData(
@@ -217,7 +225,7 @@ class FootprintViewModel @Inject constructor(
                 topRestaurants = all.toTopRestaurants(),
                 ledgerSpendThisYear = all.ledgerSpendIn(currentYear, zone),
                 ledgerSpendThisMonth = all.ledgerSpendInMonth(today, zone),
-                ledgerAverageAmount = all.ledgerAverageAmount(),
+                ledgerAverageAmount = all.ledgerAverageAmount(currentYear, zone),
                 ledgerMonthlyAmounts = all.ledgerMonthlyAmounts(today, zone),
                 topSpendRestaurants = all.toTopSpendRestaurants(),
                 ledgerCoverage = all.ledgerCoverageIn(currentYear, zone),
@@ -225,18 +233,26 @@ class FootprintViewModel @Inject constructor(
                 yearlySummaries = all.yearlySummaries(zone),
                 yearReviews = all.yearReviews(zone),
             ),
+            zone = zone,
         )
     }
 
-    val uiState: StateFlow<FootprintUiState> = combine(data, _query, _verdictFilter) { d, query, verdictFilter ->
+    val uiState: StateFlow<FootprintUiState> = combine(
+        data,
+        _query,
+        _verdictFilter,
+        _shareError,
+    ) { d, query, verdictFilter, shareError ->
         val term = query.trim()
         val visible = d.all
             .let { if (term.isEmpty()) it else it.filter { entry -> entry.matchesQuery(term) } }
             .filterByVerdict(verdictFilter)
         d.base.copy(
-            sections = visible.toSections(),
+            // 用统计时读到的同一个 zone 分组，避免标题与统计口径错位（见 FootprintData.zone）。
+            sections = visible.toSections(d.zone),
             query = query,
             verdictFilter = verdictFilter,
+            shareError = shareError,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -259,12 +275,23 @@ class FootprintViewModel @Inject constructor(
                 bitmap,
                 "mealnote-year-${System.currentTimeMillis()}.png",
             )
-            _pendingShareUri.value = uri
+            if (uri == null) {
+                // 写盘失败必须让用户看见：按了「分享」却毫无反应，会被当成应用卡死。
+                // 文案与详情页分享失败保持一致（见 RestaurantDetailViewModel.shareCard）。
+                _shareError.value = "生成分享图片失败，请检查存储空间后重试"
+            } else {
+                _pendingShareUri.value = uri
+            }
         }
     }
 
     fun consumeShareUri() {
         _pendingShareUri.value = null
+    }
+
+    /** 关闭分享失败提示;错误不会自动消失,只能由用户显式关闭。 */
+    fun consumeShareError() {
+        _shareError.value = null
     }
 
     private companion object {

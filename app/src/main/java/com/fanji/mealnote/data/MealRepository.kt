@@ -36,6 +36,18 @@ internal const val MAX_NOTE_LENGTH = 2_000
 internal const val MAX_PERSON_COUNT = 20
 
 /**
+ * 全量替换后**实际入库**的行数。
+ *
+ * 备份包来自外部文件，可能含被导入侧校验丢弃的行（id<=0、空店名、挂在不存在的餐厅下），
+ * 因此成功提示不能直接用解析出来的条数，否则会告诉用户恢复了并不存在的记录。
+ */
+data class ReplaceSummary(
+    val restaurantCount: Int,
+    val recordCount: Int,
+    val photoCount: Int,
+)
+
+/**
  * 应用唯一的业务数据入口，负责跨表一致性与照片文件生命周期。
  *
  * 分层职责：
@@ -372,6 +384,14 @@ class MealRepository @Inject constructor(
      * 主键沿用备份中的原始 id：这样 `dining_records.restaurantId` 与
      * `photos.diningRecordId` 的关联无需重映射，也是「导出—清空—导入」数据完整率 100% 的前提。
      *
+     * 导入侧校验（备份包来自外部文件，内容不可信）：
+     * - 丢弃 `id <= 0` 的餐厅 / 记录 / 照片：Room 的自增主键把 0 当作「请生成新 id」，
+     *   直接写入会让子表引用的原始 id 指向不存在的父行，最终只报出笼统的外键错误；
+     * - dishes / priceText / note 入库前统一 [normalizeText]（与表单输入同一套长度上限），
+     *   避免构造出的备份把超长文本带进数据库并污染下一次导出；
+     * - 店名与地址做 `trim()`，店名规范化后为空的餐厅整条跳过——名称是列表与详情的唯一标识，
+     *   空名行无法展示；其记录与照片随后会被 `validRestaurantIds` 过滤掉。
+     *
      * @param resolvedPaths 包内文件名 -> 私有目录绝对路径，用于把照片与封面还原为可用路径。
      */
     suspend fun replaceAllData(
@@ -379,41 +399,63 @@ class MealRepository @Inject constructor(
         records: List<DiningRecordEntity>,
         photos: List<PhotoEntity>,
         resolvedPaths: Map<String, String>,
-    ): MealResult<Unit> = runCatchingDb {
+    ): MealResult<ReplaceSummary> = runCatchingDb {
         // 导入前先收集当前所有受管文件，事务提交后统一回收，避免旧数据长期占用存储。
         val obsoleteFiles = mealDao.getAllPhotoPaths() + mealDao.getRestaurantCoverPaths()
 
-        database.withTransaction {
+        val summary = database.withTransaction {
             mealDao.clearPhotos()
             mealDao.clearDiningRecords()
             mealDao.clearRestaurants()
 
-            val validRestaurantIds = restaurants.map { it.id }.toSet()
-            val validRecordIds = records
-                .filter { it.restaurantId in validRestaurantIds }
-                .map { it.id }
-                .toSet()
-
-            restaurants.forEach { restaurant ->
-                mealDao.insertRestaurant(
-                    restaurant.copy(
-                        recommendationPhotoPath = resolvedPaths[restaurant.recommendationPhotoPath].orEmpty(),
-                    )
+            // 先过滤餐厅，再由存活餐厅推导有效 id：被丢弃的餐厅，其记录与照片也必须一并丢弃，
+            // 否则插入时会撞上外键约束（或指向不存在的父行）。
+            val validRestaurants = restaurants.mapNotNull { restaurant ->
+                if (restaurant.id <= 0) return@mapNotNull null
+                val name = restaurant.name.trim()
+                if (name.isEmpty()) return@mapNotNull null
+                restaurant.copy(
+                    name = name,
+                    address = restaurant.address.trim(),
+                    recommendationPhotoPath =
+                        resolvedPaths[restaurant.recommendationPhotoPath].orEmpty(),
                 )
             }
-            records.filter { it.restaurantId in validRestaurantIds }.forEach { record ->
+            val validRestaurantIds = validRestaurants.map { it.id }.toSet()
+
+            val validRecords = records
+                .filter { it.id > 0 && it.restaurantId in validRestaurantIds }
+                .map { record ->
+                    record.copy(
+                        dishes = record.dishes.normalizeText(MAX_DISHES_LENGTH),
+                        priceText = record.priceText.normalizeText(MAX_PRICE_TEXT_LENGTH),
+                        note = record.note.normalizeText(MAX_NOTE_LENGTH),
+                    )
+                }
+            val validRecordIds = validRecords.map { it.id }.toSet()
+
+            validRestaurants.forEach { restaurant ->
+                mealDao.insertRestaurant(restaurant)
+            }
+            validRecords.forEach { record ->
                 mealDao.insertDiningRecord(record)
             }
-            photos.filter { it.diningRecordId in validRecordIds }.forEach { photo ->
-                mealDao.insertPhoto(
-                    photo.copy(filePath = resolvedPaths[photo.filePath] ?: return@forEach)
-                )
+            var insertedPhotos = 0
+            photos.filter { it.id > 0 && it.diningRecordId in validRecordIds }.forEach { photo ->
+                val path = resolvedPaths[photo.filePath] ?: return@forEach
+                mealDao.insertPhoto(photo.copy(filePath = path))
+                insertedPhotos++
             }
+            ReplaceSummary(
+                restaurantCount = validRestaurants.size,
+                recordCount = validRecords.size,
+                photoCount = insertedPhotos,
+            )
         }
         // 事务已提交：此时回收被替换掉的旧文件不会破坏一致性。
         // 守卫会跳过任何仍被新数据引用的路径（正常情况下不会发生，作为兜底）。
         deleteUnreferencedFiles(obsoleteFiles)
-        Unit
+        summary
     }
 
     /**
@@ -463,15 +505,23 @@ class MealRepository @Inject constructor(
      * 可以忽略；若将来数据量显著增长，再改成按路径精确查询。
      *
      * 必须在**事务提交之后**调用：在事务内查询引用集合会读到未提交的中间状态。
+     * 备份恢复也复用此守卫：替换返回失败可能只是提交后的回收失败，不能直接删本次新图。
      */
-    private suspend fun deleteUnreferencedFiles(paths: Collection<String>) {
+    internal suspend fun deleteUnreferencedFiles(paths: Collection<String>) =
+        deleteUnreferencedFiles(paths) { false }
+
+    internal suspend fun deleteUnreferencedFiles(
+        paths: Collection<String>,
+        isProtected: (String) -> Boolean,
+    ) {
         val candidates = paths.filter(String::isNotBlank).distinct()
         if (candidates.isEmpty()) return
         val referenced = buildSet {
             addAll(mealDao.getAllPhotoPaths())
             addAll(mealDao.getRestaurantCoverPaths())
         }
-        val deletable = candidates.filterNot(referenced::contains)
+        // DAO 查询会挂起：删除前重新读取表单保护，防迟到回调在查询期间重新选中图片。
+        val deletable = unreferencedPhotoCandidates(candidates, referenced, isProtected)
         if (deletable.isNotEmpty()) photoStore.deleteOwnedPhotos(deletable)
     }
 

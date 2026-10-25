@@ -32,7 +32,8 @@
 - `personCount.coerceIn(1, 20)`;文本字段入库前 `normalizeText(limit)`。
 - 业务分支 `RestaurantNotFound`/`RecordNotFound` 通过事务内抛 `RestaurantMissingException`/`RecordMissingException` 表达。
 - `runCatchingDb`:`CancellationException` 重抛;`*Missing`→领域错误;`IOException`→`PhotoIoFailure`;其他 `Exception`→`DatabaseFailure`。空指针/SQL 约束错误不伪装,继续暴露。
-- `replaceAllData` 清空顺序 photos→records→restaurants(与外键方向相反);沿用备份原始 id;按 `validRestaurantIds`/`validRecordIds` 过滤孤立行;`filePath` 用 `resolvedPaths` 映射,缺失则跳过;旧受管文件提交后统一回收。
+- `replaceAllData` 清空顺序 photos→records→restaurants(与外键方向相反);沿用备份原始 id;按 `validRestaurantIds`/`validRecordIds` 过滤孤立行;`filePath` 用 `resolvedPaths` 映射,缺失则跳过;旧受管文件提交后统一回收。 返回 `ReplaceSummary`——**实际入库**的餐厅/记录/照片条数,导入成功提示以此为准(解析条数可能含被校验丢弃的行)。
+- `replaceAllData` **导入侧校验**(备份包是外部不可信输入):`id <= 0` 的餐厅/记录/照片一律丢弃(Room 把 0 当作「请生成新 id」,写入后子表会引用不存在的父行);店名 `trim()` 后为空的餐厅整条跳过(其记录与照片随后被有效 id 过滤);店名与地址 `trim()`;`dishes`/`priceText`/`note` 入库前统一 `normalizeText(limit)`(与表单同一套上限),防止构造出的备份把超长文本带进数据库并污染下一次导出。
 
 ## 2. MealDao — 纯 SQL
 
@@ -92,13 +93,13 @@ schema 版本列变化(`app/schemas/*.json`):v1 起遗留列(city/cuisine/tags/p
 
 ## 7. BackupStore — ZIP 备份读写
 
-`data/backup/BackupStore.kt`。包结构:`manifest.json / restaurants.json / dining_records.json / photos.json / photos/<name>.jpg`。常量:`MAX_JSON_BYTES=32MB`、`MAX_PHOTO_BYTES=32MB`、`MAX_TOTAL_BYTES=2GB`、`MAX_NAME_LENGTH=128`、`MAX_PICKED_FILE_BYTES=512MB`。
+`data/backup/BackupStore.kt`。包结构:`manifest.json / restaurants.json / dining_records.json / photos.json / photos/<name>.jpg`。常量:`MAX_JSON_BYTES=32MB`、`MAX_PHOTO_BYTES=32MB`、`MAX_TOTAL_BYTES=2GB`、`MAX_ARCHIVE_ENTRIES=20_000`、`MAX_NAME_LENGTH=128`、`MAX_PICKED_FILE_BYTES=512MB`。
 
 - `export(target)`:读三表→流式打包。照片稳定命名 `record{recordId}_{sortOrder}.jpg`,封面 `cover{restaurantId}.jpg`(命名空间隔离,封面复用用餐照片也另存一份)。遗留字段不导出,金额为空不写键。
-- `restore(source)`:轻量校验(>512MB 拒绝;扩展名明确非 zip 拒绝)→解压到 `cacheDir/backup_staging`→`importFile` 复制→`repository.replaceAllData`;finally 清理暂存。
+- `restore(source)`:轻量校验(>512MB 拒绝;扩展名明确非 zip 拒绝)→解压到 `cacheDir/backup_staging-<uuid>`→`importFile` 复制→`repository.replaceAllData`;finally 只清理**本次**的暂存目录;进入前按 24 小时阈值清掉陈旧的 `backup_staging-*`(进程被杀时 finally 不执行,唯一目录不再靠「下次恢复先清一遍」兜底)。目录名每次追加 UUID(固定前缀保留给残留识别):SAF 导入与 WebDAV 下载触发的恢复可能并发,共用固定目录时后进入的 `deleteRecursively()` 会把前一次正在读取的暂存照片删掉,表现为随机的「图片缺失/损坏」。
 - `defaultFileName()`:`mealnote-backup-yyyyMMdd-HHmm.zip`。
 
-读取防御 `readArchive`:每 JSON `readTextCapped(32MB)`;单文件 `copyToCapped(32MB)`;累计 `>2GB` 抛 IOException(**ZIP 炸弹防护**);**路径穿越防护**只处理 `photos/` 前缀非目录条目 + `File(name).name` 只取文件名 + 名长 ≤128;版本校验 `formatVersion` 必须 `>0 && <= FORMAT_VERSION`(拒更高版本);解析容错(`optString/optLong`,未知枚举回落,封面缺失退化无封面,`amountMinorUnits` 经 `takeIf{>0}`,`personCount` `coerceIn(1,20)`)。错误映射:IOException→PhotoIoFailure、JSONException→InvalidInput、其他→DatabaseFailure。SAF `queryDisplayName/Size` 按列名解析索引。
+读取防御 `readArchive`:条目数上限 `MAX_ARCHIVE_ENTRIES=20_000`(累计字节挡不住「大量极小条目」:几十万个空条目只占几个文件系统块却能耗尽 inode 并拖死解压);每 JSON `readTextCapped(32MB)`;单文件 `copyToCapped(32MB)`;累计 `>2GB` 抛 IOException(**ZIP 炸弹防护**);**路径穿越防护**只处理 `photos/` 前缀非目录条目,条目名统一经 `internal safePhotoEntryName()`(`File(name).name` 压平为单一文件名,空名、点段名 `.`/`..`、超 128 字符返回 null 丢弃)并被 `BackupEntryNameSafetyTest` 直接覆盖;版本校验 `formatVersion` 必须 `>0 && <= FORMAT_VERSION`(拒更高版本);解析容错(`optString/optLong`,未知枚举回落,封面缺失退化无封面,`amountMinorUnits` 经 `takeIf{>0}`,`personCount` `coerceIn(1,20)`)。错误映射:IOException→PhotoIoFailure、JSONException→InvalidInput、其他→DatabaseFailure。SAF `queryDisplayName/Size` 按列名解析索引。
 
 `BackupModels.kt`:`FORMAT_VERSION = 1`。新增字段给默认值(`optXxx` 读),只有破坏性变更才升版本,导入只接受 `<=` 当前版本。
 
@@ -120,7 +121,7 @@ schema 版本列变化(`app/schemas/*.json`):v1 起遗留列(city/cuisine/tags/p
 
 ## 9. AppLog — 运行日志
 
-`data/log/AppLog.kt`。内存环形缓冲(`MAX_MEMORY_LINES=500`)+ 落盘追加(`cacheDir/logs/mealnote.log`,`MAX_FILE_BYTES=200KB` 超限滚动丢前半),`Mutex` 串行。格式 `MM-dd HH:mm:ss.SSS L/tag: msg`。`sanitizeTag` 只留字母数字下划线取 32 字符;`appendSingleLine` 把 `\n\r` 换空格;`exportText()` 带设备/版本头去重取尾 500 行;`Uri.describeForLog()` 只留 `scheme:authority`。
+`data/log/AppLog.kt`。内存环形缓冲(`MAX_MEMORY_LINES=500`)+ 落盘追加(`cacheDir/logs/mealnote.log`,`MAX_FILE_BYTES=200KB` 超限滚动丢前半),`Mutex` 串行。格式 `MM-dd HH:mm:ss.SSS L/tag: msg`。`sanitizeTag` 只留字母数字下划线取 32 字符;`appendSingleLine` 把 `\n\r` 换空格;写内存与写盘前都经 `truncateByCodePoints` 截断(`MAX_LINE_CHARS=2000`,异常 message 附加上限 200 字)——**按 code point 计**,切点用 `offsetByCodePoints` 对齐,绝不把 emoji 代理对劈成半个(否则导出的 txt 在编辑器里显示成乱码方块);`exportText()` 带设备/版本头,先算出「文件尾」与「内存缓冲」的重合后缀并裁掉,再取尾 500 行。**不按内容去重**:同一行先入内存再落盘,直接拼接会重复;但连点两次产生的两条相同日志是「点了几次」的证据,`distinct()` 会把它悄悄吞掉;`Uri.describeForLog()` 只留 `scheme:authority`。
 
 **隐私边界**:只记事件与原因,不记店名/地址/餐品/备注/花费原文/文件绝对路径/URI 明文/备份内容;异常只记类名 + 前 200 字。
 
@@ -159,6 +160,6 @@ UTF-8 **BOM** + RFC4180 转义(逗号/引号/换行;emoji 按 code point 保真)
 2. 读:UI → Repository `observe*`(Flow)/`get*`(一次性)→ DAO;照片由 PhotoStore 读私有目录。
 3. 写:ViewModel 收集表单+已导入路径 → Repository `add/update/delete*`(事务内改库,提交后回收文件)→ `MealResult`;文本经 `normalizeText`,金额经 `parseLedgerAmountMinor`/`takeIf{>0}`。
 4. 照片生命周期:import/camera 落盘(未入库)→表单保存后被引用→删除/替换/取消经守卫回收→孤儿由 `cleanupOrphanPhotos`+`deleteOrphanPhotos` 清理。
-5. 备份:export 读三表打包→ZIP;restore 解压暂存→importFile→replaceAllData。WebDAV 复用同一 export/restore 加网络层。
+5. 备份:export 读三表打包→ZIP;restore 解压暂存→executeRestore 全部复制成功→replaceAllData。任一复制失败在替换前中止，本次新图统一经 deleteUnreferencedFiles 回收，提交后失败仍保留数据库引用图；取消原样重抛。WebDAV 复用同一 export/restore 加网络层。
 
 约束速查:①跨表写必须在 `withTransaction` 内原子;②先提交事务再删文件;③删除守卫(双引用场景);④迁移三方一致 + 禁 destructive;⑤枚举名即编码 + 遗留列永久保留;⑥金额非正落 null、仅人均乘人数;⑦文本按 code point 截断;⑧路径穿越防护(PhotoStore + BackupStore);⑨ZIP 炸弹/超大文件防护;⑩WebDAV 仅 https、不跟随重定向、凭证脱敏;⑪`CancellationException` 一律重抛;⑫可预期失败走 `MealResult`,程序缺陷继续抛。

@@ -128,6 +128,43 @@ class AmountParsingTest {
         assertNull(parseLedgerAmountMinor("人均600000", personCount = 2))
     }
 
+    // ─────────────────────────── 整数溢出：只返 null，绝不抛异常 ───────────────────────────
+
+    @Test
+    fun `十八位数字返回 null 而不是整数溢出崩溃`() {
+        // 18 位「元」×100 后已是 20 位，远超 Long 上限。旧实现先 longValueExact()
+        // 再判范围，会抛 ArithmeticException，调用方（表单自动识别）没有 try/catch。
+        assertNull(parseLedgerAmountMinor("123456789012345678", personCount = 1))
+    }
+
+    @Test
+    fun `十九位数字返回 null 而不是整数溢出崩溃`() {
+        assertNull(parseLedgerAmountMinor("1234567890123456789", personCount = 1))
+    }
+
+    @Test
+    fun `Long最大值量级的元金额返回 null`() {
+        // 9,223,372,036,854,775,807 元 ×100 = 9.22e20 分，long 装不下。
+        assertNull(parseLedgerAmountMinor(Long.MAX_VALUE.toString(), personCount = 1))
+    }
+
+    @Test
+    fun `负数超大金额返回 null`() {
+        // 负号不参与数字匹配，实际取到的是超长正数；无论如何都只返 null 而非崩溃。
+        assertNull(parseLedgerAmountMinor("-99999999999999999999", personCount = 1))
+    }
+
+    @Test
+    fun `带千分位逗号的超长数字返回 null`() {
+        assertNull(parseLedgerAmountMinor("9,223,372,036,854,775,807", personCount = 1))
+    }
+
+    @Test
+    fun `人均超长数字乘人数也返回 null`() {
+        // 人均单价本身超长，× 20 人后更不能窄化成 Long。
+        assertNull(parseLedgerAmountMinor("人均99999999999999999", personCount = 20))
+    }
+
     // ─────────────────────────── 人数探测 ───────────────────────────
 
     @Test

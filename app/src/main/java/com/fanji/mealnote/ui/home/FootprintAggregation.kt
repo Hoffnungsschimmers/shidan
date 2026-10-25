@@ -112,14 +112,17 @@ internal fun List<FootprintEntry>.toTopRestaurants(limit: Int = MAX_TOP_RESTAURA
         }
 
 /**
- * 按月份分组。
+ * 按月份分组（月份归属按 [zone] 判定）。
  *
  * 依赖上游已按 `eatenAt DESC` 排序（见 `MealDao.observeAllDiningRecords`），
  * 因此这里用 `groupBy` 即可保持「新月份在前、月内新记录在前」的顺序，
  * 不需要二次排序。**若上游排序被改动，此处顺序会一并失效。**
+ *
+ * 必须显式传 [zone]：统计（`yearCount`、`toYearMonth(zone)` 等）也是按这个时区归属的，
+ * 分组若回落到系统时区，跨年零点附近的记录就可能和统计落在不同年份/月份。
  */
-internal fun List<FootprintEntry>.toSections(): List<FootprintSection> =
-    groupBy { it.record.eatenAt.formatMonthLabel() }
+internal fun List<FootprintEntry>.toSections(zone: ZoneId): List<FootprintSection> =
+    groupBy { it.record.eatenAt.formatMonthLabel(zone) }
         .map { (title, entries) -> FootprintSection(title, entries) }
 
 /**

@@ -110,10 +110,12 @@ fun RestaurantDetailScreen(
     restaurantId: Long,
     onBack: () -> Unit,
     onAddVisit: () -> Unit,
-    /** 「照上次再来一份」：带入该条记录的内容打开表单。 */
+    /** 熟店快记：仅复用餐品，历史花费作为参考。 */
     onCopyLastVisit: (Long) -> Unit,
     onEditRestaurant: () -> Unit,
     onEditVisit: (Long) -> Unit,
+    savedRecordId: Long? = null,
+    onDismissSaved: () -> Unit = {},
     viewModel: RestaurantDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -188,6 +190,30 @@ fun RestaurantDetailScreen(
                         )
                     }
 
+                    savedRecordId?.let { recordId ->
+                        item(key = "saved-visit") {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                MessageBanner(
+                                    message = "已记录这一餐",
+                                    actionLabel = "编辑这条记录",
+                                    onAction = {
+                                        onDismissSaved()
+                                        onEditVisit(recordId)
+                                    },
+                                )
+                                MiuixButton(
+                                    label = "知道了",
+                                    onClick = onDismissSaved,
+                                    style = MiuixButtonStyle.Text,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                    }
+
                     item(key = "stats") {
                         StatsRow(
                             visitCount = uiState.visits.size,
@@ -203,7 +229,7 @@ fun RestaurantDetailScreen(
                             } else {
                                 buildString {
                                     append("共 ${uiState.visits.size} 次")
-                                    uiState.totalSpentMinor?.let { append(" · 累计 ¥${it.formatLedgerAmount()}") }
+                                    uiState.totalSpentMinor?.let { append(" · 累计 ${it.formatLedgerAmount()}") }
                                     append("，新的在上面")
                                 }
                             },
@@ -329,7 +355,7 @@ fun RestaurantDetailScreen(
                         // 避免一个点了没反应的按钮。
                         latestRecordId?.let { recordId ->
                             MiuixButton(
-                                label = "照上次",
+                                label = "熟店快记",
                                 onClick = { onCopyLastVisit(recordId) },
                                 icon = Icons.Rounded.Replay,
                                 style = MiuixButtonStyle.Tonal,
@@ -349,6 +375,7 @@ fun RestaurantDetailScreen(
                             message = message,
                             actionLabel = "知道了",
                             onAction = viewModel::consumeError,
+                            destructive = true,
                         )
                     }
                 }

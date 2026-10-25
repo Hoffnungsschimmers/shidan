@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
@@ -30,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -37,7 +41,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fanji.mealnote.ui.components.FormBottomGap
-import com.fanji.mealnote.ui.components.FormErrorLine
+import com.fanji.mealnote.ui.components.FormErrorBanner
+import com.fanji.mealnote.ui.components.AmountLedgerSummary
+import com.fanji.mealnote.ui.components.MiuixChip
+import com.fanji.mealnote.ui.businessMillisToPickerUtcMillis
+import com.fanji.mealnote.ui.pickerUtcMillisToBusinessMillis
+import java.time.ZoneId
 import com.fanji.mealnote.ui.components.MealDateRow
 import com.fanji.mealnote.ui.components.MealPhotoSection
 import com.fanji.mealnote.ui.components.MiuixButton
@@ -64,19 +73,20 @@ import java.io.File
 @Composable
 fun AddVisitScreen(
     restaurantId: Long,
-    /** 「照上次再来一份」的来源记录；为 null 表示空白表单。 */
+    /** 熟店快记的来源记录；为 null 表示空白表单。 */
     copyFromRecordId: Long?,
     onBack: () -> Unit,
-    onSaved: () -> Unit,
+    onSaved: (Long) -> Unit,
     viewModel: AddVisitViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val restaurantName by viewModel.restaurantName.collectAsStateWithLifecycle()
+    val recentDishes by viewModel.recentDishes.collectAsStateWithLifecycle()
     val photoViewer = rememberPhotoViewerState()
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
-    // 「记账金额、就餐人数、补充记录」默认折叠：新记录里它们多为选填,先只露核心字段,
-    // 让「记一餐」保持简短;需要时一键展开。金额仍会从花费文本自动识别并入账,折叠不丢数据。
+    // 编辑器可折叠，但入账摘要始终可见；照片和补充只在需要时展开。
     var showMore by rememberSaveable { mutableStateOf(false) }
+    var showPhotos by rememberSaveable { mutableStateOf(false) }
     // 保存相机目标文件路径而非 File 对象：拍照期间进程可能被回收，
     // 普通 remember 无法保存不可序列化的 File，重建后会丢失拍摄结果的关联。
     var pendingCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
@@ -86,7 +96,7 @@ fun AddVisitScreen(
         viewModel.setRestaurantId(restaurantId)
         viewModel.setCopyFrom(copyFromRecordId)
     }
-    LaunchedEffect(uiState.saved) { if (uiState.saved) onSaved() }
+    LaunchedEffect(uiState.savedRecordId) { uiState.savedRecordId?.let(onSaved) }
 
     val galleryPicker = rememberGalleryPicker(maxItems = MAX_VISIT_PHOTOS) { uris ->
         viewModel.onPhotosPicked(uris)
@@ -102,7 +112,8 @@ fun AddVisitScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding(),
+            .statusBarsPadding()
+            .imePadding(),
     ) {
         MiuixTopBar(
             title = "记录一餐",
@@ -111,7 +122,7 @@ fun AddVisitScreen(
         )
 
         LazyColumn(
-            modifier = Modifier.weight(1f).imePadding(),
+            modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
@@ -148,6 +159,22 @@ fun AddVisitScreen(
                             maxLines = 4,
                             leadingIcon = Icons.Rounded.RestaurantMenu,
                         )
+                        if (recentDishes.isNotEmpty()) {
+                            Text(
+                                "最近吃过 · 点选带入餐品",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(recentDishes, key = { it }) { dish ->
+                                    MiuixChip(
+                                        label = dish,
+                                        onClick = { viewModel.onRecentDish(dish) },
+                                        modifier = Modifier.widthIn(max = 220.dp),
+                                    )
+                                }
+                            }
+                        }
                         MiuixTextField(
                             value = uiState.priceText,
                             onValueChange = viewModel::onPriceChange,
@@ -155,32 +182,58 @@ fun AddVisitScreen(
                             placeholder = "128、人均60、约200 都行",
                             singleLine = true,
                             leadingIcon = Icons.Rounded.Payments,
-                            supportingText = "想到多少写多少，不确定就写个大概",
+                            supportingText = "本次整桌花费；识别结果会显示在下方",
                         )
+                        if (uiState.referencePriceText.isNotBlank()) {
+                            Text(
+                                text = "上次花费（仅供参考）：${uiState.referencePriceText}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                            )
+                            MiuixButton(
+                                label = "本次相同，带入花费",
+                                onClick = viewModel::useReferencePrice,
+                                style = MiuixButtonStyle.Text,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                 }
             }
 
-            item {
-                MealPhotoSection(
-                    title = "照片",
-                    subtitle = "选填，最多 $MAX_VISIT_PHOTOS 张",
-                    photoPaths = uiState.photoPaths,
-                    photoDescription = "用餐照片（选填）",
-                    isImporting = uiState.isImportingPhotos,
-                    canAddPhoto = uiState.canAddPhoto,
-                    onGallery = { galleryPicker.launch() },
-                    onCamera = {
-                        val (file, uri) = viewModel.createCameraTarget()
-                        pendingCameraPath = file.absolutePath
-                        cameraPicker.launch(uri)
-                    },
-                    onRemove = viewModel::removePhoto,
-                    onPreview = { index -> photoViewer.open(uiState.photoPaths, index) },
-                )
+            if (showPhotos || uiState.photoPaths.isNotEmpty() || uiState.isImportingPhotos) {
+                item {
+                    MealPhotoSection(
+                        title = "照片",
+                        subtitle = "选填，最多 $MAX_VISIT_PHOTOS 张",
+                        photoPaths = uiState.photoPaths,
+                        photoDescription = "用餐照片（选填）",
+                        isImporting = uiState.isImportingPhotos,
+                        canAddPhoto = uiState.canSave && uiState.canAddPhoto,
+                        onGallery = { galleryPicker.launch() },
+                        onCamera = {
+                            val (file, uri) = viewModel.createCameraTarget()
+                            pendingCameraPath = file.absolutePath
+                            cameraPicker.launch(uri)
+                        },
+                        onRemove = viewModel::removePhoto,
+                        onPreview = { index -> photoViewer.open(uiState.photoPaths, index) },
+                    )
+                }
+            } else {
+                item {
+                    MiuixButton(
+                        label = "添加照片（选填）",
+                        onClick = { showPhotos = true },
+                        style = MiuixButtonStyle.Text,
+                        icon = Icons.Rounded.Add,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
 
-            if (showMore) {
+            if (showMore || uiState.note.isNotBlank()) {
                 item {
                     AmountLedgerSection(
                         amountMinor = uiState.effectiveAmountMinor,
@@ -204,8 +257,16 @@ fun AddVisitScreen(
                 }
             } else {
                 item {
+                    AmountLedgerSummary(
+                        amountMinor = uiState.effectiveAmountMinor,
+                        personCount = uiState.personCount,
+                        overridden = uiState.amountOverridden,
+                        onEdit = { showMore = true },
+                    )
+                }
+                item {
                     MiuixButton(
-                        label = "记账金额、就餐人数、备注（选填）",
+                        label = "就餐人数、金额、补充记录",
                         onClick = { showMore = true },
                         style = MiuixButtonStyle.Text,
                         icon = Icons.Rounded.Add,
@@ -214,11 +275,14 @@ fun AddVisitScreen(
                 }
             }
 
-            item { FormErrorLine(message = uiState.errorMessage) }
-
             item { FormBottomGap() }
         }
 
+        FormErrorBanner(
+            message = uiState.errorMessage,
+            onDismiss = viewModel::dismissError,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        )
         MiuixButton(
             label = "保存记录",
             onClick = viewModel::save,
@@ -233,12 +297,15 @@ fun AddVisitScreen(
     }
 
     if (showDatePicker) {
-        val state = rememberDatePickerState(initialSelectedDateMillis = uiState.dateMillis)
+        val zone = remember { ZoneId.systemDefault() }
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = businessMillisToPickerUtcMillis(uiState.dateMillis, zone),
+        )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    state.selectedDateMillis?.let(viewModel::onDateChange)
+                    state.selectedDateMillis?.let { viewModel.onDateChange(pickerUtcMillisToBusinessMillis(it, zone)) }
                     showDatePicker = false
                 }) { Text("确定") }
             },

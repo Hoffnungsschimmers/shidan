@@ -63,6 +63,8 @@ WebDAV 连通性检查、重复店名提醒、年度回顾卡片、单店累计�
 
 完整设计规范见 [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md)，**下一步规划见 [ROADMAP.md](ROADMAP.md)**（历史项目书见 [PROJECT_PLAN.md](PROJECT_PLAN.md)），版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
+当前工作区的系统地图、可靠性缺口与下一轮验收顺序见 [2026-10-22 项目评估](docs/PROJECT_AUDIT_2026-10-22.md)；实跑记录见 [评估证据](docs/PROJECT_AUDIT_EVIDENCE_2026-10-22.json)。后续 F01/F02 的实现与验证见 [数据保护修复状态](docs/PROJECT_FIX_STATUS_2026-10-22.md)；熟店快记与体验优化见 [本轮状态](docs/QUICK_RECORD_STATUS_2026-10-22.md)。该评估不代表业务问题已全部修复或设备/真实服务器验证已完成。
+
 ## 技术栈
 
 - Kotlin / Java 17
@@ -116,7 +118,7 @@ C:\Users\2540\mealnote-workspace  ->  C:\Users\2540\Desktop\mealnote
 
 若出现 `build-cache-1\*.part (拒绝访问)` 之类的缓存写入失败，可追加 `--no-build-cache` 绕过。
 
-### 已知环境问题：单元测试类路径（2026-10-06 复测未复现）
+### 已知环境问题：单元测试类路径（2026-10-06 / 2026-10-20 复测均未复现）
 
 历史上本机执行 `testDebugUnitTest` 时，所有测试类都会在装载阶段报
 `java.lang.ClassNotFoundException ... at initializationError`（注意是**全部**测试类，
@@ -124,11 +126,11 @@ C:\Users\2540\mealnote-workspace  ->  C:\Users\2540\Desktop\mealnote
 （`app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntimeJar/classes.jar`）
 未被加入测试工作进程的运行时类路径，测试代码因此看不到主源码集中的类——这与被测代码无关。
 
-**2026-10-06 用 `--rerun` 强制实跑，28 套件 / 252 例全部通过，问题未再出现。**
+**2026-10-06 用 `--rerun` 强制实跑，28 套件 / 252 例全部通过，问题未再出现；2026-10-20 打磨轮再次实跑，29 套件 / 266 例全部通过。**
 日常跑测试用 `scripts/run-unit-tests.ps1`（自动发现测试类，无需维护清单）；
 下面的 JDK 直跑命令保留为**备用路径**，仅在换机或该问题复发时使用。
 
-在该问题修复前，可改用 JDK 直接运行同一批测试（结果等价）。**首选跑法是
+若该问题复发，可改用 JDK 直接运行同一批测试（结果等价）。**首选跑法是
 `scripts/run-unit-tests.ps1`**：它从 `app/src/test/java` 自动发现测试类，不需要维护下面的
 类清单，也就不可能漂移。下面的手工命令是备用路径，用它才必须同步清单。
 
@@ -149,6 +151,7 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
   com.fanji.mealnote.data.webdav.WebDavProbeTest \
   com.fanji.mealnote.data.webdav.WebDavUrlSafetyTest \
   com.fanji.mealnote.ui.FormattersTest \
+  com.fanji.mealnote.ui.StateTransitionsTest \
   com.fanji.mealnote.ui.add.DuplicateNameCheckTest \
   com.fanji.mealnote.ui.detail.DetailStatsTest \
   com.fanji.mealnote.ui.edit.ReclaimableFormPhotosTest \
@@ -176,15 +179,19 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 
 ## 构建状态
 
-以下为 **2026-10-07（v0.6.1）**对当前代码的实测结果：
+2026-10-22 F01/F02 修复后：JVM **31套件/299例**实跑通过，新增33例；具体构建验收与平台限制见 [数据保护修复状态](docs/PROJECT_FIX_STATUS_2026-10-22.md)。后续熟店快记与体验优化：JVM **35套件/354例**脚本及原生 Gradle 入口通过，Lint、Debug/Release 构建及迁移测试 APK 编译/资产检查通过；本轮设备限制见 [快记状态](docs/QUICK_RECORD_STATUS_2026-10-22.md)。
+
+以下为 **2026-10-20（v0.6.1 之后的打磨轮，未发版、未改版本号）**的历史工作区实测结果：
 
 | 检查项 | 状态 |
 |---|---|
-| `testDebugUnitTest`（`--rerun` 强制实跑） | 28 个套件 / 252 个用例全部通过，0 失败 0 错误 |
-| `scripts/run-unit-tests.ps1` | 同上（从源码发现 28 个测试类，`OK (252 tests)`） |
+| `testDebugUnitTest`（`--rerun` 强制实跑） | 29 个套件 / 266 个用例全部通过，0 失败 0 错误 |
+| `scripts/run-unit-tests.ps1` | 同上（从源码发现 29 个测试类，`OK (266 tests)`） |
 | `lintDebug` | 通过，报告 `No issues found` |
-| `assembleDebug` | 通过（versionCode 17，versionName 0.6.1，label 食单）；已交付 `C:\Users\2540\Desktop\mealnote\apk\食单-v0.6.1-debug.apk` |
-| `assembleRelease` | 通过（R8 混淆 + 资源裁剪），`apksigner verify` 退出码 0；已交付 `C:\Users\2540\Desktop\mealnote\apk\食单-v0.6.1-release.apk`，证书与 v0.5.1/v0.6.0 release 逐字一致，可覆盖安装保数据 |
+| `assembleDebug` | 通过（versionCode 17，versionName 0.6.1，label 食单）；本轮未改动 `apk/` 交付包 |
+| `assembleRelease` | 通过（R8 混淆 + 资源裁剪）；本轮未重新跑 `apksigner verify`、未替换 `apk/食单-v0.6.1-*.apk` |
+
+> 本轮（2026-10-20）是 v0.6.1 之后的打磨轮：只改代码与文档，**不发版、不改版本号、不动 `apk/`**；验证仍限于 JVM 测试、Lint 与两次构建，未做真机/模拟器验证。
 
 > 构建能过 ≠ 功能可用：本机无真机/模拟器，**UI 与 WebDAV 远程路径均未经验证**（见 ROADMAP 第七/九节）。
 

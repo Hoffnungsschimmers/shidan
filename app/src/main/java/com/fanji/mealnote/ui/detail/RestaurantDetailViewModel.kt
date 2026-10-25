@@ -9,6 +9,7 @@ import com.fanji.mealnote.data.MealRepository
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.ShareImageStore
 import com.fanji.mealnote.data.local.RestaurantWithRecords
+import com.fanji.mealnote.ui.tryTransition
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +22,6 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -157,15 +157,16 @@ class RestaurantDetailViewModel @Inject constructor(
     /**
      * 确认删除用餐记录。
      *
-     * 防抖同样使用原子状态跃迁：对话框在删除过程中保持显示（按钮禁用），
-     * 因此连续点击不会产生并发的删除请求。
+     * 防抖使用原子状态跃迁（[tryTransition]）：只有真正完成「空闲 → 删除中」跃迁的调用
+     * 才发起请求，重复点击拿到 null 直接返回。对话框在删除过程中保持显示、
+     * 按钮禁用只是界面层的第二道防线，不作为并发正确性的依据——早先依赖返回值里的
+     * `isDeleting` 判断是无效守卫，那是写入后的状态，恒为 true。
      */
     fun confirmDeleteRecord() {
         val recordId = localState.value.pendingDeleteRecordId ?: return
-        val snapshot = localState.updateAndGet { state ->
-            if (state.isDeleting) state else state.copy(isDeleting = true, errorMessage = null)
-        }
-        if (!snapshot.isDeleting) return
+        localState.tryTransition { state ->
+            if (state.isDeleting) null else state.copy(isDeleting = true, errorMessage = null)
+        } ?: return
 
         viewModelScope.launch {
             when (val result = repository.deleteDiningRecord(recordId)) {
@@ -184,15 +185,17 @@ class RestaurantDetailViewModel @Inject constructor(
     /**
      * 确认删除整个餐厅。
      *
+     * 与 [confirmDeleteRecord] 共用同一个 [RestaurantDetailUiState.isDeleting] 守卫：
+     * 两种删除互斥，删除餐厅未结束前再次触发（或同时触发删除记录）都会被拒绝。
+     *
      * 成功后通过 [RestaurantDetailUiState.deletionCompleted] 通知界面返回列表：
      * 此时详情页订阅的餐厅已不存在，继续停留会渲染“记录不存在”的空状态。
      */
     fun confirmDeleteRestaurant() {
         val targetId = restaurantId.value ?: return
-        val snapshot = localState.updateAndGet { state ->
-            if (state.isDeleting) state else state.copy(isDeleting = true, errorMessage = null)
-        }
-        if (!snapshot.isDeleting) return
+        localState.tryTransition { state ->
+            if (state.isDeleting) null else state.copy(isDeleting = true, errorMessage = null)
+        } ?: return
 
         viewModelScope.launch {
             when (val result = repository.deleteRestaurant(targetId)) {
