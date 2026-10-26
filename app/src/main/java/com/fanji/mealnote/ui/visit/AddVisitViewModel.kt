@@ -457,9 +457,6 @@ class AddVisitViewModel @Inject constructor(
         super.onCleared()
     }
 
-    super.onCleared()
-    }
-
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L
         const val PHOTO_LIMIT_REACHED = "最多可添加 $MAX_VISIT_PHOTOS 张图片"

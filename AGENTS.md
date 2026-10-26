@@ -3,6 +3,10 @@
 > 本文件是给 AI 代理与协作者的**稳定规则清单**,只写不常变的目标、架构、命令、修改约束、验收与安全边界。
 > 产品与视觉细节以专题文档为准(见文末索引),本文与它们冲突时以专题文档为准。
 > 代码级模块参考见 `docs/`。
+>
+> **接手第一步(强制)**:先读 `docs/PROJECT_STATUS.md`(当前状态、风险、已裁决事项)与
+> `docs/DEVELOPMENT_LOG.md` 最新一条(上一轮做了什么、验证到哪),不要重新全仓摸底。
+> **每次会话结束前按 §9 回写这两份文档。**
 
 ---
 
@@ -95,8 +99,15 @@ Compose Screen → ViewModel → MealRepository → { MealDao, PhotoStore, Backu
 ## 7. 已知瓶颈(排期时优先考虑)
 
 - 本机**无设备/模拟器**:UI、深色模式、大字体、TalkBack 一律未经真机确认(`android-automation` 技能可用于 `adb install`/`screencap`/`uiautomator dump`)。
-- `MealRepository` 与全部 ViewModel **零测试覆盖**;`AppDatabaseMigrationTest` 仪器测试从未运行(升级路径是风险最高、验证最薄的一环)。
+- **相机照片通道绕过 `PhotoStore` 处理链**:`createCameraTarget()` 让系统相机直接写 `files/photos`,
+  四个表单 VM 只落路径,没有 2048px 降采样、JPEG88、EXIF 校正或 32MB 上限。这是缺陷,不是设计
+  (相册导入才走 `importSingleInner`);详见 `docs/PROJECT_STATUS.md` R-03/D-02。
+- JVM 测试 **38 类 / 399 例**可通过(2026-10-26 实测),含 17 例照片回收与 13 例上传生产接缝测试（真实临时文件+依赖替身），
+  但 `MealRepository`、`PhotoStore`、`BackupStore`、`WebDavStore` 与全部 ViewModel **仍无完整直接集成测试**;
+  `AppDatabaseMigrationTest` 六条迁移路径与 v4 Room/DAO 断言已编译，仪器测试从未运行
+  (升级路径是风险最高、验证最薄的一环)。
 - 「验证能力」优先于「新增功能」——继续堆未验证功能只会扩大未验证表面积。
+- 「测试全过」只代表 JVM 层;不等于 UI、迁移、备份、WebDAV 或发布可用。
 
 ## 8. 文档索引
 
@@ -108,6 +119,8 @@ Compose Screen → ViewModel → MealRepository → { MealDao, PhotoStore, Backu
 | `ROADMAP.md` | 发展规划(第七节节奏 + **第九节落地校准**,二者取代前六节版本表) |
 | `OPTIMIZATION_PLAN.md` | 当前执行清单与验收门(修复打磨轮,不加新功能);状态列可能落后于工作区 |
 | `CHANGELOG.md` | 全部版本权威变更记录 |
+| `docs/PROJECT_STATUS.md` | **当前状态单一事实来源**(版本/分支/验证矩阵/风险登记/已裁决事项);接手先读 |
+| `docs/DEVELOPMENT_LOG.md` | 追加式开发日志(每次实质工作的改动、验证、未验证、下一步) |
 | `PROJECT_PLAN.md` / `HANDOFF*.md` | 历史项目书与交接文档(仅供追溯) |
 | `scripts/run-unit-tests.ps1` | 全量 JVM 测试入口,**从源码自动发现测试类**(首选跑法,清单不会漂移) |
 | `docs/` | **代码级模块参考**(见下) |
@@ -119,3 +132,26 @@ Compose Screen → ViewModel → MealRepository → { MealDao, PhotoStore, Backu
 - `docs/FEATURES.md` — 记账、随机选店、备份恢复、WebDAV、分享卡片、运行日志、流畅模式
 - `docs/BUILD_AND_TEST.md` — 构建命令、环境坑、测试策略与清单
 - `docs/SECURITY_PRIVACY.md` — 权限、签名、数据安全不变式、隐私红线
+- `docs/PROJECT_STATUS.md` — 当前状态、验证矩阵、风险登记、已裁决事项
+- `docs/DEVELOPMENT_LOG.md` — 追加式开发日志
+
+## 9. 状态与变更记录(强制)
+
+任何 AI 代理或协作者,只要**改动了代码/文档**,或**得出了会影响后续工作的结论/决策**,
+在结束本轮工作前必须完成以下两项;这是交付的一部分,不是可选项:
+
+1. **追加 `docs/DEVELOPMENT_LOG.md`**:按文件头模板,写清日期、执行者、起点(分支 + HEAD)、范围、
+   改动文件、**实际执行的验证命令与原始结果**、未验证项、决策/发现、遗留与下一步。
+   最新条目放最上方;只追加,不改写历史;纠错用新条目说明。
+2. **回写 `docs/PROJECT_STATUS.md`**:凡是版本、DB 版本、分支/HEAD、功能状态、验证结果、
+   风险状态、已裁决事项发生变化,就地更新对应章节,并刷新文件头的「最后更新」。
+   风险关闭时保留 ID,状态改为「已解决(日期 + 证据)」,不删行。
+
+记录纪律:
+
+- **区分证据等级**:`[实测]` / `[代码]` / `[文档]` / `[推断]`;没实际运行过的检查**禁止**写成「通过」。
+- 只把**当前仍成立**的事实写进 `PROJECT_STATUS.md`;过程与历史写 `DEVELOPMENT_LOG.md`。
+- 文档与代码冲突时以代码为准,先修文档并在日志里记一笔;无法裁决的写进「文档漂移与待裁决」。
+- **不要重复调查已裁决事项**(`PROJECT_STATUS.md` §6);如推翻旧结论,附新证据并更新裁决表。
+- 发版级变更仍写入 `CHANGELOG.md`;**本节的日志不替代 CHANGELOG,也不授权 commit/发版**。
+- 未经用户逐轮确认仍然不 commit、不改 versionCode/versionName、不动 `apk/`。

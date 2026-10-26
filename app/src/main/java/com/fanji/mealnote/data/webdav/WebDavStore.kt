@@ -5,6 +5,7 @@ import com.fanji.mealnote.data.MealError
 import com.fanji.mealnote.data.MealResult
 import com.fanji.mealnote.data.backup.BackupStore
 import com.fanji.mealnote.data.log.AppLog
+import com.fanji.mealnote.data.map
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -65,29 +66,20 @@ class WebDavStore @Inject constructor(
 
         // 先在本地生成一份备份包，再整体 PUT：流式边读边传失败时难以重试，
         // 整包 PUT 失败可直接整体报错，用户重试即可。
-        val local = File(context.cacheDir, "webdav_upload.zip")
         try {
-            val built = buildLocalBackup(local)
-                ?: return@withContext MealResult.Failure(MealError.PhotoIoFailure)
-            putFile(config, local)
-            appLog.info("webdav", "upload ok size=${local.length()} url=${config.displayHost()}")
-            MealResult.Success(
-                UploadSummary(
-                    restaurantCount = built.restaurantCount,
-                    recordCount = built.recordCount,
-                    photoCount = built.photoCount,
-                )
-            )
+            val local = File.createTempFile("webdav_upload_", ".zip", context.cacheDir)
+            executeBackupUpload(local, ::buildLocalBackup) { file ->
+                putFile(config, file)
+                appLog.info("webdav", "upload ok size=${file.length()} url=${config.displayHost()}")
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (error: WebDavHttpException) {
             appLog.warn("webdav", "upload failed code=${error.code}")
             MealResult.Failure(error.toMealError("上传失败", config))
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            throw cancelled
         } catch (error: Exception) {
             appLog.warn("webdav", "upload failed error=${error.javaClass.simpleName}")
             MealResult.Failure(MealError.PhotoIoFailure)
-        } finally {
-            local.delete()
         }
     }
 
@@ -96,10 +88,7 @@ class WebDavStore @Inject constructor(
         withContext(Dispatchers.IO) {
             val config = preference.config.value
             val check = checkConfig(config)
-            if (check != null) {
-                @Suppress("UNCHECKED_CAST")
-                return@withContext check as MealResult<com.fanji.mealnote.data.backup.RestoreSummary>
-            }
+            if (check != null) return@withContext check
 
             val local = File(context.cacheDir, "webdav_download.zip")
             try {
@@ -113,16 +102,14 @@ class WebDavStore @Inject constructor(
                 )
                 // FileProvider 的 cache-path 需覆盖该文件，见 res/xml/file_paths.xml。
                 backupStore.restore(uri)
-            } catch (error: WebDavHttpException) {
-                appLog.warn("webdav", "download failed code=${error.code}")
-                @Suppress("UNCHECKED_CAST")
-                MealResult.Failure(error.toMealError("下载失败", config)) as MealResult<com.fanji.mealnote.data.backup.RestoreSummary>
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
+            } catch (error: WebDavHttpException) {
+                appLog.warn("webdav", "download failed code=${error.code}")
+                MealResult.Failure(error.toMealError("下载失败", config))
             } catch (error: Exception) {
                 appLog.warn("webdav", "download failed error=${error.javaClass.simpleName}")
-                @Suppress("UNCHECKED_CAST")
-                MealResult.Failure(MealError.PhotoIoFailure) as MealResult<com.fanji.mealnote.data.backup.RestoreSummary>
+                MealResult.Failure(MealError.PhotoIoFailure)
             } finally {
                 local.delete()
             }
@@ -251,25 +238,21 @@ class WebDavStore @Inject constructor(
             host.matches(Regex("""172\.(1[6-9]|2\d|3[01])\..*"""))
     }
 
-    private data class LocalBackup(val restaurantCount: Int, val recordCount: Int, val photoCount: Int)
-
-    /** 在本地生成备份包：复用 BackupStore 的导出 JSON 与照片打包逻辑。 */
-    private suspend fun buildLocalBackup(target: File): LocalBackup? {
-        // BackupStore.export 只写 SAF Uri；这里用 file Uri 桥接：
+    /** 在本地生成备份包；导出失败原样透传，不伪装成通用文件读写失败。 */
+    private suspend fun buildLocalBackup(target: File): MealResult<UploadSummary> {
+        // BackupStore.export 经 ContentResolver 写 Uri；这里用 FileProvider 桥接：
         // FileProvider 的 Uri 走 ContentResolver.openOutputStream 同样可写。
         val uri = androidx.core.content.FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
             target,
         )
-        return when (val result = backupStore.export(uri)) {
-            is MealResult.Success -> LocalBackup(
-                result.value.restaurantCount,
-                result.value.recordCount,
-                result.value.photoCount,
+        return backupStore.export(uri).map { summary ->
+            UploadSummary(
+                summary.restaurantCount,
+                summary.recordCount,
+                summary.photoCount,
             )
-
-            is MealResult.Failure -> null
         }
     }
 

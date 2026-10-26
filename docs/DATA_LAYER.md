@@ -27,7 +27,7 @@
 
 核心不变量:
 - **先提交事务、再删文件**:全部删除路径一致遵守。颠倒会导致回滚后仍引用已删文件,形成不可修复坏记录;正确顺序最坏留孤儿文件(可 `cleanupOrphanPhotos` 回收)。
-- **删除守卫 `deleteUnreferencedFiles`**:删前重读全表引用集合(`getAllPhotoPaths + getRestaurantCoverPaths`),只删无任何行引用的文件(一张用餐照片可兼作封面,被两处引用)。必须事务提交后调用(事务内查询读到未提交中间态)。
+- **删除守卫 `deleteUnreferencedFiles`**:删前重读全表引用集合(`getAllPhotoPaths + getRestaurantCoverPaths`),候选与引用按 canonical 文件身份比较，只删无任何行引用的文件(一张用餐照片可兼作封面,被两处引用)。任何非空引用解析失败均中止回收并写脱敏警告（事务已提交，不将旁路失败误报为保存失败）；单个候选无法解析则保留。必须事务提交后调用(事务内查询读到未提交中间态)，仍保留 DAO 挂起后实时表单保护检查。删除失败只向 `AppLog` 写计数，不写路径或异常原文。
 - `amountMinorUnits?.takeIf { it > 0 }`:非正数金额落库为 `null`(0=未记录,免费餐写备注)。
 - `personCount.coerceIn(1, 20)`;文本字段入库前 `normalizeText(limit)`。
 - 业务分支 `RestaurantNotFound`/`RecordNotFound` 通过事务内抛 `RestaurantMissingException`/`RecordMissingException` 表达。
@@ -84,7 +84,7 @@ schema 版本列变化(`app/schemas/*.json`):v1 起遗留列(city/cuisine/tags/p
 安全/不变量:
 - **路径穿越防护 `isOwnedByApp`**:`canonicalFile` 比较 + 要求文件**直接父目录**即照片目录(`canonical.parentFile == directory`)。所有删除都经此校验。
 - 导入两阶段:先 `decodeDownsampled`(`inJustDecodeBounds` 算 2 的幂 `inSampleSize` + EXIF 方向校正);失败退回 `copyRawBytes`(≤32MB),再 `isImageFile` 校验文件头魔数(注:MP4 会被 ftyp 误放行,已知近似)。
-- 孤儿清理跳过 `lastModified > cutoff` 新文件(避免误删导入中图片);引用集合用 `canonicalPath` 归一。
+- 孤儿清理跳过 `lastModified > cutoff` 新文件(避免误删导入中图片);引用集合用 `canonicalPath` 归一。`PhotoReclamation.kt` 提供生产磁盘回收接缝，时钟阈值由调用方传入；删除首个文件前先解析全部非空引用，任何引用或根目录解析失败均抛不含敏感路径的 `IOException` 中止清理，设置页显示失败而非「没有需要清理」。候选解析失败、目录外/子目录身份均保留。17 例 JVM 回归直接调用该接缝，但不代表 Android PhotoStore 全链已验证。
 - `writeBitmap` 不 recycle(回收在 `importSingle` 的 finally),避免 `Cannot draw recycled bitmap`。全程 `Dispatchers.IO`;结果写 `AppLog`(脱敏)。
 
 ## 6. ShareImageStore
@@ -107,8 +107,8 @@ schema 版本列变化(`app/schemas/*.json`):v1 起遗留列(city/cuisine/tags/p
 
 `data/webdav/WebDavStore.kt`,仅 PUT/GET,远端固定单文件,上传即覆盖,无版本/增量/自动同步。用 `HttpURLConnection`(不引 OkHttp)。`TIMEOUT_MS=30_000`、`MAX_DOWNLOAD_BYTES=512MB`。
 
-- `upload()`:`checkConfig`→`buildLocalBackup`(经 FileProvider 桥接 `BackupStore.export`→`cacheDir/webdav_upload.zip`)→`putFile`→finally 删本地。
-- `downloadAndRestore()`:`getFile`→FileProvider Uri→复用 `backupStore.restore`(复用全套防护)→finally 删本地。
+- `upload()`:`checkConfig`→独立 `cacheDir/webdav_upload_<随机>.zip`→`executeBackupUpload`→`buildLocalBackup`(经 FileProvider 桥接 `BackupStore.export`)→成功才 `putFile`→finally 尝试删除本次临时包。`buildLocalBackup` 返回 `MealResult<UploadSummary>`，用已有 `MealResult.map` 保留本地导出的原始 Failure（含 StorageFull/InvalidInput/DatabaseFailure），不再变成 null 再误报 PhotoIoFailure。执行器在导出前、PUT 前及 PUT 后检查取消；重叠操作临时文件隔离不代表远端覆盖冲突已解决。
+- `downloadAndRestore()`:`getFile`→FileProvider Uri→复用 `backupStore.restore`(复用全套防护)→finally 删本地。失败返回使用 `MealResult` 协变直接返回，已移除三处多余 `UNCHECKED_CAST`；下载固定临时文件/网络错误分类本轮不改。
 - `openConnection`:显式超时、`instanceFollowRedirects=false`、Basic Auth。
 
 安全(**WebDAV URL 安全重点**):

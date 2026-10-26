@@ -1,6 +1,7 @@
 package com.fanji.mealnote.data.local
 
 import android.database.Cursor
+import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.room.testing.MigrationTestHelper
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -8,6 +9,9 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.fanji.mealnote.di.DatabaseModule
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -71,7 +75,103 @@ class AppDatabaseMigrationTest {
         helper.runMigrationsAndValidate(databaseName, endVersion, true, *migrations).use { db ->
             assertSamples(db, startVersion, endVersion)
         }
+        if (endVersion == 4) {
+            // Helper 校验导出的 schema 后，再由真实 Room 打开同一库，验证生成的 DAO / Converters / @Relation。
+            // 与 DatabaseModule 使用相同的 AppDatabase 和完整迁移链；只替换库名，避免触碰应用数据。
+            val database = Room.databaseBuilder(
+                InstrumentationRegistry.getInstrumentation().targetContext,
+                AppDatabase::class.java,
+                databaseName,
+            ).addMigrations(
+                DatabaseModule.Migration1To2,
+                DatabaseModule.Migration2To3,
+                DatabaseModule.Migration3To4,
+            ).build()
+            try {
+                assertDaoSamples(database, startVersion)
+            } finally {
+                database.close()
+            }
+        }
     }
+
+    private fun assertDaoSamples(database: AppDatabase, startVersion: Int) = runBlocking {
+        // Flow 首次查询有明确超时，避免关联查询失败时仪器测试无限等待。
+        withTimeout(10_000L) {
+            val dao = database.mealDao()
+            val expectedCover = if (startVersion >= 2) coverPath else ""
+            assertEquals(
+                listOf(
+                    listOf(1L, "示例餐厅", "示例地址", RestaurantStatus.WANT_TO_EAT, 100L, 100L, ""),
+                    listOf(2L, "已去餐厅🍜", "另一地址 2 号", RestaurantStatus.EATEN, 200L, 300L, expectedCover),
+                ),
+                dao.getAllRestaurants().map {
+                    listOf(it.id, it.name, it.address, it.status, it.createdAt, it.updatedAt, it.recommendationPhotoPath)
+                },
+            )
+            val expectedRecords = listOf(
+                listOf(11L, 2L, 1700000000000L, Verdict.GOOD, "牛肉面🍜、小菜", "服务很好\n下次再来",
+                    1700000000100L, if (startVersion >= 3) "两个人 158" else "", null, 1),
+                listOf(12L, 2L, 1700086400000L, Verdict.MEH, "炒饭", "口味尚可",
+                    1700086400100L, "", null, 1),
+                listOf(13L, 2L, 1700172800000L, Verdict.BAD, "汤", "等候太久",
+                    1700172800100L, if (startVersion >= 3) "人均 60 左右" else "", null, 1),
+            )
+            assertEquals(expectedRecords, dao.getAllDiningRecords().map(::recordValues))
+            val expectedPhotos = listOf(
+                PhotoEntity(21L, 11L, coverPath, 0),
+                PhotoEntity(22L, 11L, secondPhotoPath, 1),
+                PhotoEntity(23L, 12L, thirdPhotoPath, 0),
+            )
+            assertEquals(expectedPhotos, dao.getAllPhotos())
+
+            val wantToEat = requireNotNull(dao.observeRestaurantWithRecords(1L).first())
+            assertEquals(1L, wantToEat.restaurant.id)
+            assertEquals(RestaurantStatus.WANT_TO_EAT, wantToEat.restaurant.status)
+            assertEquals(emptyList<DiningRecordWithPhotos>(), wantToEat.records)
+            val eaten = requireNotNull(dao.observeRestaurantWithRecords(2L).first())
+            assertEquals(2L, eaten.restaurant.id)
+            assertEquals(RestaurantStatus.EATEN, eaten.restaurant.status)
+            assertEquals(expectedCover, eaten.restaurant.recommendationPhotoPath)
+            // @Relation 不承诺顺序，排序后同时断言每条记录及其照片归属（含无照片的记录）。
+            val relatedRecords = eaten.records.sortedBy { it.record.id }
+            assertEquals(expectedRecords, relatedRecords.map { recordValues(it.record) })
+            relatedRecords.forEach { related ->
+                assertEquals(
+                    expectedPhotos.filter { it.diningRecordId == related.record.id },
+                    related.photos.sortedBy { it.id },
+                )
+            }
+            assertEquals(
+                listOf(thirdPhotoPath, coverPath, secondPhotoPath),
+                dao.getPhotoPathsForRestaurant(2L),
+            )
+            assertEquals(
+                if (startVersion >= 2) listOf(coverPath) else emptyList<String>(),
+                dao.getRestaurantCoverPaths(),
+            )
+
+            // 省略新增列才能证明 SQLite 插入默认值有效，DAO @Insert 会显式绑定实体默认值，不能替代此检查。
+            // 仅 SQL fixture 为旧 NOT NULL 的 star 填值；不访问 Deprecated 实体属性。
+            database.openHelper.writableDatabase.execSQL(
+                "INSERT INTO dining_records " +
+                    "(id, restaurantId, eatenAt, verdict, dishes, note, createdAt, star) " +
+                    "VALUES (14, 2, 1700259200000, 'GOOD', '迁移后新增餐品', '', 1700259200100, 0)",
+            )
+            assertEquals(
+                listOf(14L, 2L, 1700259200000L, Verdict.GOOD, "迁移后新增餐品", "",
+                    1700259200100L, "", null, 1),
+                recordValues(requireNotNull(dao.getDiningRecord(14L))),
+            )
+            assertRows(database.openHelper.readableDatabase, "PRAGMA foreign_key_check", emptyList())
+        }
+    }
+
+    // 只比较现行业务字段，不用 Entity.equals / copy 间接依赖遗留字段。
+    private fun recordValues(record: DiningRecordEntity): List<Any?> = listOf(
+        record.id, record.restaurantId, record.eatenAt, record.verdict, record.dishes, record.note,
+        record.createdAt, record.priceText, record.amountMinorUnits, record.personCount,
+    )
 
     private fun insertSamples(db: SupportSQLiteDatabase, version: Int) {
         val coverColumn = if (version >= 2) ", recommendationPhotoPath" else ""

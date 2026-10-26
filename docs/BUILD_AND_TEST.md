@@ -49,6 +49,7 @@ C:\Users\2540\mealnote-workspace  ->  C:\Users\2540\Desktop\mealnote
 | `testDebugUnitTest` 曾报全体测试类 `ClassNotFoundException at initializationError` | **2026-10-06 复测未复现**(28 套件 / 252 例全过),**2026-10-20 打磨轮再次实跑 29 套件 / 266 例全过**。历史记录的原因是 AGP 的 `bundleDebugClassesToRuntimeJar` 产物(`.../runtime_app_classes_jar/debug/.../classes.jar`)未进测试工作进程运行时类路径。若复发,改用 JDK 直跑(第 5 节)或 `scripts/run-unit-tests.ps1` |
 | 找不到 JDK 17 工具链 | 显式 `-Porg.gradle.java.installations.paths="D:/env/jdk-17.0.16+8"` |
 | `build-cache-1\*.part 拒绝访问` | 追加 `--no-build-cache`,必要时删 `~/.gradle/caches/build-cache-1` |
+| accessors/transforms 的 `metadata.bin` 缺失 | 2026-10-26 实测：停止 daemon 与关闭配置缓存不能解决；检查完整目标路径后将 `~/.gradle/caches/8.14.3` 隔离到同级 `8.14.3-mealnote-quarantine-20261026`，保留回退，不删依赖下载缓存。重建后测试与构建恢复 |
 | R8 报 `classes.dex 另一个程序正在使用此文件` | `.\gradlew.bat --stop` → 删 `app/build/intermediates/dex/release/` → 重建 |
 | `lintDebug` 与 `assembleDebug` 同跑偶发 R8 内部错误 | 分开单独跑、重跑 |
 | 改了测试源码但任务 UP-TO-DATE | 手动删 `app/build/tmp/kotlin-classes/debugUnitTest` 后重编 |
@@ -73,12 +74,14 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 
 ## 6. 测试清单(app/src/test,JVM 单元)
 
-当前 **35 个测试套件、354 例**(计数以 `scripts/run-unit-tests.ps1` 从源码发现的结果为准;`grep -rc "@Test" app/src/test` 可复核)。首选跑法是 `scripts/run-unit-tests.ps1`——它从 `app/src/test/java` 自动发现测试类,**不存在类清单,也就不可能漂移**;`testDebugUnitTest` 可在英文联接目录跑通,早先记录的 `ClassNotFoundException` 未再复现,JDK 直跑是备用路径,用它才需要手工同步清单。下表是**阅读用**索引,新增/删除测试类时顺手更新即可,不作硬性约定。测试类:
+当前 **38 个测试套件、399 例**(2026-10-26 WebDAV 错误通道工作包实跑 `OK (399 tests)`;计数以 `scripts/run-unit-tests.ps1` 从源码发现的结果为准;`grep -rc "@Test" app/src/test` 可复核)。首选跑法是 `scripts/run-unit-tests.ps1`——它从 `app/src/test/java` 自动发现测试类,**不存在类清单,也就不可能漂移**;`testDebugUnitTest` 可在英文联接目录跑通,早先记录的 `ClassNotFoundException` 未再复现,JDK 直跑是备用路径,用它才需要手工同步清单。下表是**阅读用**索引,新增/删除测试类时顺手更新即可,不作硬性约定。测试类:
 
 | 测试类 | 覆盖 |
 |---|---|
 | `data.MealResultTest` | 统一结果模型 |
 | `data.MealTextTest` | 文本规范化(含 emoji 代理对穷举) |
+| `data.MealErrorMessagesTest` | `MealError` → 用户文案的穷举映射与保存错误分支（15例） |
+| `data.PhotoReclamationTest` | 生产照片回收接缝（17例）：真实临时文件、共享/别名引用、坏路径整次中止、目录边界、年龄阈值与取消；非完整 Android PhotoStore/Repository 集成测试 |
 | `data.local.ConvertersTest` | 枚举 ↔ 字符串转换、未知值容错 |
 | `data.AmountParsingTest` | 金额解析(人均/桌价/千分位/识别不出返回 null) |
 | `data.backup.BackupEntryNameSafetyTest` | 备份条目名路径穿越防护 |
@@ -88,6 +91,7 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 | `data.settings.BudgetPreferenceParseTest` | 预算元→分解析/清除/封顶 |
 | `data.webdav.WebDavProbeTest` | WebDAV 连通性检查状态码归类 |
 | `data.webdav.WebDavUrlSafetyTest` | WebDAV URL 安全 / 凭据脱敏 |
+| `data.webdav.UploadExecutorTest` | 生产上传执行器（13例）：本地导出失败原样返回且不 PUT、完整字节、异常/取消、PUT 前取消与临时包隔离；真实临时文件+导出/上传替身，不是真实 WebDAV/SAF 验收 |
 | `ui.FormattersTest` | 日期/金额/存储量格式化 |
 | `ui.MealDatesTest` | DatePicker UTC 自然日 ↔ 本地业务日、跨月/年/闰日/DST（8例） |
 | `ui.StateTransitionsTest` | `tryTransition` 的 CAS 语义(含多线程「只有一个赢家」) |
@@ -113,7 +117,7 @@ app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntim
 | `ui.visit.VisitFormLogicTest` | 明确采用参考花费、多人人均换算、部分导入/容量反馈与金额摘要（11例） |
 | `ui.visit.VisitPhotoTransitionsTest` | 生产用餐图片 CAS 接缝：提交/导入/加载互斥、容量/重复回调/原图保护、引用查询后实时保护（10例；非完整VM或真实PhotoStore测试） |
 
-androidTest:`data.local.AppDatabaseMigrationTest`：**6 例**，覆盖 1→2、2→3、3→4、1→3、1→4、2→4。样本含餐厅、记录、照片，检查关系、枚举、时间/文本、已有封面/花费及新增 NULL/1 默认值；全部调用生产 Migration，**尚未在设备运行**。
+androidTest:`data.local.AppDatabaseMigrationTest`：**6 例**，覆盖 1→2、2→3、3→4、1→3、1→4、2→4。样本含餐厅、记录、照片，检查关系、枚举、时间/文本、已有封面/花费及新增 NULL/1 默认值；全部调用生产 Migration。2026-10-26 增强：迁移至 v4 的三条路径在 Helper 校验后再由真实 Room 打开，验证生成 DAO/Converters/嵌套关系，以及省略新列的 SQL 插入默认值。`assembleDebugAndroidTest` 与 4 份 schema 资产 SHA-256 检查已通过，**尚未在设备运行**。
 
 2026-10-22 补齐 `androidTest.assets` → `app/schemas`，仅进入测试 APK；`ksp room.schemaLocation` 只负责导出，不能替代资源接线。无设备时先编译并校验资产：
 ```powershell
@@ -121,7 +125,7 @@ androidTest:`data.local.AppDatabaseMigrationTest`：**6 例**，覆盖 1→2、2
   "-Porg.gradle.java.installations.paths=D:\env\jdk-17.0.16+8"
 .\scripts\check-migration-assets.ps1
 ```
-脚本检查每份历史 JSON 在测试 APK 中恰好出现一次，并比对 SHA-256。检查失败不会被当作仪器测试通过；接设备后再跑：
+脚本检查每份历史 JSON 在测试 APK 中恰好出现一次，并比对 SHA-256。**脚本需 PowerShell 7(`pwsh`)**：它使用 `[Convert]::ToHexString`，Windows PowerShell 5.1 没有该方法会直接报错。检查失败不会被当作仪器测试通过；接设备后再跑：
 ```powershell
 .\gradlew.bat -p C:\Users\2540\mealnote-workspace connectedDebugAndroidTest `
   "-Porg.gradle.java.installations.paths=D:\env\jdk-17.0.16+8" `
@@ -130,6 +134,8 @@ androidTest:`data.local.AppDatabaseMigrationTest`：**6 例**，覆盖 1→2、2
 使用测试设备且不要卸载用户真实数据。测试操作独立的 `migration-test` 数据库；覆盖不包括真实照片文件读写和旧版 APK 覆盖安装。
 
 历史例外：1→2 为封面列添加 `DEFAULT ''`，而 v2 起新建 schema 未声明 SQL 默认值。Room 2.8.4 容忍实体未声明默认值时的差异；本轮用 `PRAGMA table_info` 显式断言已知封面差异及 priceText/amount/personCount 默认值，不宣称所有历史路径与全新建库严格等价，也不修改历史 schema。
+
+> **2026-10-26 已裁决(不要重复调查)**：按 Room 2.8.4 字节码，`TableInfo` 只在实体侧声明了默认值时才比较默认值，期望为 `null` 时跳过，因此该差异**不会**抛 `Migration didn't properly handle`，v1/v2→v4 不会因此崩溃。**不要删除 `DEFAULT ''`**——有数据的老用户执行 `ADD COLUMN NOT NULL` 会直接失败；给实体补默认值则必须升 DB v5 并重建表。详见 `docs/PROJECT_STATUS.md` §6 D-01。
 
 ## 7. 测试策略(约定)
 

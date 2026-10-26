@@ -55,9 +55,9 @@
 
 | # | 事项 | 状态 |
 |---|---|---|
-| 1.1 | `MealError` 新增 `NetworkFailure`（结果通道，不入库）；`WebDavStore.buildLocalBackup` 透传原始失败、移除 3 处 `UNCHECKED_CAST`、catch 分支整理（`CancellationException` 永远第一）、`testConnection` 不再挪用 `InvalidInput` | ⬜ |
+| 1.1 | `MealError` 新增 `NetworkFailure`（结果通道，不入库）；`WebDavStore.buildLocalBackup` 透传原始失败、移除 3 处 `UNCHECKED_CAST`、catch 分支整理（`CancellationException` 永远第一）、`testConnection` 不再挪用 `InvalidInput` | 🔶 2026-10-26：已修本地导出失败透传、取消置首、移除三处多余转换；新增上传生产执行接缝及独立临时包。NetworkFailure/连通性与 HTTP 错误分类未改，真实服务器往返仍待验收；验证见 PROJECT_STATUS 最新记录 |
 | 1.2 | `BackupStore` 两处 `catch(Exception)→DatabaseFailure` 细化归类（CE 置首） | ⬜ |
-| 1.3 | `PhotoStore.deleteOrphanPhotos`：canonical 解析失败的路径**视为受保护**而非剔除保护集；`deleteUnreferencedFiles` 删除失败计数上报 `AppLog`（脱敏）。**改完人工重读删除全部分支** | ⬜ |
+| 1.3 | `PhotoStore.deleteOrphanPhotos`：canonical 解析失败的路径**视为受保护**而非剔除保护集；`deleteUnreferencedFiles` 删除失败计数上报 `AppLog`（脱敏）。**改完人工重读删除全部分支** | ✅ 2026-10-26：非空引用无法解析则整次中止（无法识别对应文件时不猜测删除），候选解析失败保留；定向回收也归一文件身份；17 例生产接缝 JVM 回归通过，已逐分支重读。真实 Android/设备文件生命周期仍未验证 |
 | 1.4 | 抽 `MealErrorMessages.kt`：6 份 `MealError→文案` when 收敛为单一纯函数 + 穷举测试；4 份 `toImportMessage` 副本合一 | ⬜ |
 | 1.5 | 店名 / 地址入库前纳入 `MealText.normalizeText(limit)` 上限（code point 安全，补截断测试）；照片上限双常量归一 | ⬜ |
 | 1.6 | `isAllowedScheme`、`WebDavConfig.remoteUrl()` 补单元测试 | ⬜ |

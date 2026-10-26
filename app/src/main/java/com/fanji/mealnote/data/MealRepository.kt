@@ -10,6 +10,7 @@ import com.fanji.mealnote.data.local.RestaurantEntity
 import com.fanji.mealnote.data.local.RestaurantStatus
 import com.fanji.mealnote.data.local.RestaurantWithRecords
 import com.fanji.mealnote.data.local.Verdict
+import com.fanji.mealnote.data.log.AppLog
 import kotlinx.coroutines.flow.Flow
 import java.io.IOException
 import javax.inject.Inject
@@ -64,6 +65,7 @@ class MealRepository @Inject constructor(
     private val database: AppDatabase,
     private val mealDao: MealDao,
     private val photoStore: PhotoStore,
+    private val appLog: AppLog,
 ) {
     fun observeRestaurants(): Flow<List<RestaurantEntity>> = mealDao.observeRestaurants()
 
@@ -521,8 +523,17 @@ class MealRepository @Inject constructor(
             addAll(mealDao.getRestaurantCoverPaths())
         }
         // DAO 查询会挂起：删除前重新读取表单保护，防迟到回调在查询期间重新选中图片。
-        val deletable = unreferencedPhotoCandidates(candidates, referenced, isProtected)
-        if (deletable.isNotEmpty()) photoStore.deleteOwnedPhotos(deletable)
+        val deletable = try {
+            unreferencedPhotoCandidates(candidates, referenced, isProtected)
+        } catch (_: IOException) {
+            // 回收是提交后的旁路：引用不完整则保留整批文件，不把已保存的数据误报为失败。
+            appLog.warn("photos", "File reclamation aborted: unresolved reference")
+            return
+        }
+        if (deletable.isNotEmpty()) {
+            val failed = photoStore.deleteOwnedPhotos(deletable)
+            if (failed > 0) appLog.warn("photos", "File reclamation incomplete count=$failed")
+        }
     }
 
     /**

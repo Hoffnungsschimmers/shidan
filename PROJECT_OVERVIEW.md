@@ -3,7 +3,8 @@
 > 整理日期：2026-09-20 ｜ 最近校准：**2026-10-20**（第二、四、九、十、十二、十四、十五节按工作区实况重写；本轮为 v0.6.1 之后的文档打磨，未发版）
 > 本文件是对整个项目的单一入口式概览：定位、现状、结构、架构、数据、约定、已知问题与文档索引。
 > 各主题的权威文档见文末「文档索引」，本文与它们冲突时以对应专题文档为准。
-> 2026-10-22 新增 [工作区评估与发展准备](docs/PROJECT_AUDIT_2026-10-22.md)：本页的 2026-10-20 快照保留作历史记录，当前不足、迁移测试补齐与实际验证边界以该评估及 [执行证据](docs/PROJECT_AUDIT_EVIDENCE_2026-10-22.json) 为准。后续 F01/F02 修复以 [数据保护修复状态](docs/PROJECT_FIX_STATUS_2026-10-22.md) 为准；熟店快记与体验优化见 [快记状态](docs/QUICK_RECORD_STATUS_2026-10-22.md)，当前测试数以 `docs/BUILD_AND_TEST.md` 为准。
+> 2026-10-22 新增 [工作区评估与发展准备](docs/PROJECT_AUDIT_2026-10-22.md)：本页的 2026-10-20 快照保留作历史记录，当前不足、迁移测试补齐与实际验证边界以该评估及 [执行证据](docs/PROJECT_AUDIT_EVIDENCE_2026-10-22.json) 为准。后续 F01/F02 修复以 [数据保护修复状态](docs/PROJECT_FIX_STATUS_2026-10-22.md) 为准；熟店快记与体验优化见 [快记状态](docs/QUICK_RECORD_STATUS_2026-10-22.md)，测试计数细节见 `docs/BUILD_AND_TEST.md`。
+> **2026-10-26 起：本页的「工作区实况」数字(未提交行数、测试计数、代码规模)可能滞后；当前状态、风险与验证结论一律以 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) 为准，每轮改动记录见 [`docs/DEVELOPMENT_LOG.md`](docs/DEVELOPMENT_LOG.md)。本轮交付 v0.6.2（18）本地待验收包，细节见 [`docs/RELEASE_0.6.2.md`](docs/RELEASE_0.6.2.md)；以下 2026-10-20 快照不是新版交付状态。**
 
 ---
 
@@ -344,13 +345,15 @@ Release 用根目录 `mealnote-release.jks` 自签名（凭据在 `local.propert
 
 | 文件 | 内容 |
 |---|---|
-| `AGENTS.md` | **代理协作规约**（目标、架构、命令、硬约定、验收门槛、安全边界）——与本文同为接手必读 |
+| `AGENTS.md` | **代理协作规约**（目标、架构、命令、硬约定、验收门槛、安全边界、状态记录规则）——与本文同为接手必读 |
+| `docs/PROJECT_STATUS.md` | **当前状态单一事实来源**：版本/分支、验证矩阵、风险登记、已裁决事项——接手先读 |
+| `docs/DEVELOPMENT_LOG.md` | 追加式开发日志：每轮改动、实际验证、未验证项与下一步 |
 | `README.md` | 产品现状、技术栈、构建环境（含已知环境问题与 JDK 直跑命令）、构建状态、迁移说明、代码分层、发布签名、开发约定 |
 | `CHANGELOG.md` | 全部版本的权威变更记录（每个版本含验证结果） |
 | `DESIGN_SYSTEM.md` | 视觉与交互规范（**UI 改动以其为准**）：信息架构、术语、色彩、形状、字体、组件、动效、玻璃、图像、无障碍、语义树 |
 | `ROADMAP.md` | 发展规划：记账、评价范围随机筛选、竞品调研、新功能优先级（**§7.3 的节奏已被 `OPTIMIZATION_PLAN.md` 取代**） |
 | `OPTIMIZATION_PLAN.md` | 当前执行清单与验收门（修复打磨轮，不加新功能）；阶段 0 已完成，阶段 1–5 部分条目在打磨轮顺手做掉（状态列已按 2026-10-20 校准） |
-| `docs/` | **代码级模块参考**：`ARCHITECTURE` / `DATA_LAYER` / `UI_LAYER` / `FEATURES` / `BUILD_AND_TEST` / `SECURITY_PRIVACY` |
+| `docs/` | **代码级模块参考**：`ARCHITECTURE` / `DATA_LAYER` / `UI_LAYER` / `FEATURES` / `BUILD_AND_TEST` / `SECURITY_PRIVACY` / `PROJECT_STATUS` / `DEVELOPMENT_LOG` |
 | `scripts/run-unit-tests.ps1` | 全量 JVM 测试入口（从源码自动发现测试类，清单不会漂移） |
 | `PROJECT_PLAN.md` | 历史股东项目书（背景、早期路线图、里程碑、风险）；§21 为 2026-09-10 产品方向调整 |
 | `HANDOFF-0.4.0.md` / `HANDOFF.md` | 历史交接文档（v0.4.0 与 0.3.x 时期），仅供追溯 |

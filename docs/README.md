@@ -13,16 +13,19 @@
 | [FEATURES.md](FEATURES.md) | 以功能为主线串起数据+界面:记账、随机、备份、WebDAV、分享、日志、流畅模式等,附功能↔代码对照 | 按功能定位涉及的所有代码 |
 | [BUILD_AND_TEST.md](BUILD_AND_TEST.md) | 构建命令、中文路径与 JDK 坑、JDK 直跑测试、测试清单与策略、发布门槛 | 构建、跑测试、加测试 |
 | [SECURITY_PRIVACY.md](SECURITY_PRIVACY.md) | 权限、数据安全四不变式、AppLog 隐私红线、WebDAV/备份/照片安全、签名与密钥 | 涉及权限/网络/删除/日志/发布 |
+| [PROJECT_STATUS.md](PROJECT_STATUS.md) | **当前状态单一事实来源**:版本/分支/验证矩阵/风险登记/已裁决事项 | **接手第一步**;排期、判断能否发布 |
+| [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) | 追加式开发日志:每次实质工作的改动、验证、未验证、决策与下一步 | 想知道上一轮做了什么、验证到哪 |
 
 ## 快速起步(接手项目)
 
-1. 先读 `../AGENTS.md`(硬约定)与本页;
+1. 先读 `../AGENTS.md`(硬约定)、`PROJECT_STATUS.md`(当前状态)与 `DEVELOPMENT_LOG.md` 最新条目;
 2. 按任务方向选上表文档深入;
 3. 动手前确认 `docs/BUILD_AND_TEST.md` 的环境与命令(中文路径联接 + JDK 17 + JDK 直跑测试);
 4. 涉及数据模型/删除/网络/日志时,先核对 `docs/SECURITY_PRIVACY.md` 的不变式再改。
 
 ## 维护约定
 
-- 这些文档描述**当前代码事实**(截至 DB v4 / v0.5.1)。改动相关代码时同步更新对应文档;
+- 这些文档描述**当前代码事实**(截至 DB v4 / v0.6.2（本地待验收包）)。改动相关代码时同步更新对应文档;
+- **每次实质工作结束前必须追加 `DEVELOPMENT_LOG.md` 并回写 `PROJECT_STATUS.md`**(规则见 `../AGENTS.md` §9);
 - schema/迁移/测试清单变化必须同步 `README.md` 与 `docs/DATA_LAYER.md`、`docs/BUILD_AND_TEST.md`;
 - 文档只写稳定事实与约束,不写临时状态与凭据。

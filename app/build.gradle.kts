@@ -16,8 +16,8 @@ android {
         applicationId = "com.fanji.mealnote"
         minSdk = 26
         targetSdk = 36
-        versionCode = 17
-        versionName = "0.6.1"
+        versionCode = 18
+        versionName = "0.6.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true

@@ -176,23 +176,13 @@ class PhotoStore @Inject constructor(
      * 的陈旧文件：正常保存流程不会耗时这么久，而残留文件会随时间自然满足条件。
      *
      * @return 清理掉的孤儿文件数量。
+     * @throws IOException 引用或照片目录无法解析时，在删除任何文件前中止清理。
      */
-    fun deleteOrphanPhotos(referencedPaths: Collection<String>): Int {
-        val referenced = referencedPaths
-            .mapNotNull { runCatching { File(it).canonicalPath }.getOrNull() }
-            .toSet()
-        val files = photoDirectory().listFiles() ?: return 0
-        val cutoff = System.currentTimeMillis() - ORPHAN_MIN_AGE_MS
-        var removed = 0
-        files.forEach { file ->
-            if (!file.isFile) return@forEach
-            // 跳过刚创建的文件，避免误删正在拍摄/导入中的图片。
-            if (file.lastModified() > cutoff) return@forEach
-            val canonical = runCatching { file.canonicalPath }.getOrNull() ?: return@forEach
-            if (canonical !in referenced && file.delete()) removed++
-        }
-        return removed
-    }
+    fun deleteOrphanPhotos(referencedPaths: Collection<String>): Int = deleteOrphanPhotoFiles(
+        directory = photoDirectory(),
+        referencedPaths = referencedPaths,
+        cutoffMillis = System.currentTimeMillis() - ORPHAN_MIN_AGE_MS,
+    )
 
     /** 统计照片目录当前占用空间（字节），用于设置页展示存储用量。 */
     fun photoDirectorySizeBytes(): Long =
