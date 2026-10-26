@@ -36,4 +36,5 @@
 - Debug 与 Release 不能互相覆盖；请安装与当前应用相同类型的包。
 - 相机照片处理、备份对称限额/内存压力、网络错误分类等风险仍见 PROJECT_STATUS，不因为出包关闭。
 - 未连接设备、未访问真实服务器、未替用户安装或恢复数据。
-- Git 提交结果将在实际 commit 完成后同步；远端仍为 `https://github.com/Hoffnungsschimmers/shidan.git`，本轮不推送。
+- 代码与配套文档已提交：`e8652d7` — `fix: 照片回收与备份上传可靠性修复并打包(v0.6.2)`；23 文件。提交后工作树干净，后续仅同步实际提交结果文档。
+- 分支 `polish/quick-record-experience`；origin 为 `https://github.com/Hoffnungsschimmers/shidan.git`，**本轮未 push**。

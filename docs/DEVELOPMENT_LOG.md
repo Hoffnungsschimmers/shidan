@@ -21,6 +21,17 @@
 
 ---
 
+## 2026-10-26 — v0.6.2 代码提交完成，回写交付状态
+
+- **执行者：** AI 代理（Claude Code）
+- **起点：** `polish/quick-record-experience` @ `e8652d7`（用户本轮授权提交）
+- **范围：** 仅提交结果文档同步，不再修改生产代码或 APK。
+- **改动文件：** `docs/PROJECT_STATUS.md` 版本/提交/工作区与 R-01 关闭；`docs/RELEASE_0.6.2.md` 实际提交结果；本日志追加。
+- **验证：** 精确暂存 23 个源码/测试/版本/文档文件，`git diff --cached --check` 通过，暂存敏感文件名检查未命中；`git commit` → `[polish/quick-record-experience e8652d7] fix: 照片回收与备份上传可靠性修复并打包(v0.6.2)`，`23 files changed, 1117 insertions(+), 88 deletions(-)`；随后 `git status --short` 无输出。`git diff main...HEAD --shortstat` → `89 files changed, 5581 insertions(+), 1079 deletions(-)`。同一代码树 v0.6.2 构建/签名验证详见上一条。
+- **未验证：** 设备/真实 SAF/WebDAV 门槛仍未完成；本轮未 push、未创建远程 Release。APK 与签名凭据仍不入库。
+- **决策 / 发现：** R-01 已随代码提交解决，不保留「工作区修复尚未提交」的过期当前事实；`e8652d7` 是此 APK 对应的代码提交，后续仅文档同步不改变包内容。
+- **遗留 / 下一步：** 提交本条实际结果文档同步并核对最终工作树；由用户安装同签名类型待验收包，先备份且不卸载旧应用；远端 `https://github.com/Hoffnungsschimmers/shidan.git` 未推送。
+
 ## 2026-10-26 — v0.6.2 本地待验收安装包产出
 
 - **执行者：** AI 代理（Claude Code）

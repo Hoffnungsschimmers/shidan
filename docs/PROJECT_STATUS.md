@@ -4,8 +4,8 @@
 > 历史轨迹看 [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md)，发版记录看 [`../CHANGELOG.md`](../CHANGELOG.md)。
 > 维护规则见 [`../AGENTS.md`](../AGENTS.md) §9。
 >
-> **最后更新：2026-10-26（v0.6.2 本地打包验证完成）** ｜ 更新者：AI 代理（Claude Code）
-> **对应代码：** `cb954b1` + 未提交语法修复、照片保护/迁移测试与 WebDAV 上传错误通道增强（见 §2）
+> **最后更新：2026-10-26（v0.6.2 打包并提交完成）** ｜ 更新者：AI 代理（Claude Code）
+> **对应代码：** `e8652d7`（v0.6.2 代码与交付文档提交；后续仅同步提交结果文档）
 > **证据等级：** `[实测]` 本次实际运行 ｜ `[代码]` 读源码确认 ｜ `[文档]` 仅文档声明 ｜ `[推断]` 未验证
 
 ---
@@ -40,18 +40,13 @@
 |---|---|---|
 | 当前分支 | `polish/quick-record-experience`，**无 upstream、未推送** | `git status -sb` |
 | main | `e3c0f3a`（v0.6.1） | `git log` |
-| 相对 main | 1 个提交 `cb954b1`，78 文件 `+4472/−999` | `git diff main...HEAD --stat` |
+| 相对 main | v0.6.2 代码提交 `e8652d7` 包含前一打磨提交 `cb954b1`，89 文件 `+5581/−1079`（提交结果文档同步前快照） | `[实测]` `git diff main...e8652d7 --shortstat` |
 | origin | `https://github.com/Hoffnungsschimmers/shidan.git` | `git remote -v` |
-| 工作区 | 已有 `AddVisitViewModel.kt` 语法修复（删除 3 行）保留；新增照片回收保护/日志与 17 例回归，增强六路径迁移测试；WebDAV 本地导出失败透传/独立上传临时包与 13 例执行器回归，状态/构建/数据层文档同步；全部未提交 | `[实测]` `git status --short` |
+| 代码提交 / 工作区 | 前轮语法/照片/迁移/WebDAV 改动与版本/文档共 23 文件已提交到 `e8652d7`；提交后 `git status --short` 为空。APK 忽略，仅本机交付；随后同步提交结果文档 | `[实测]` `git commit` / `git status --short` |
 
-**HEAD 语法错误（P0，未解决）**：`cb954b1` 的 `AddVisitViewModel.kt` 在 `onCleared()` 之后残留类体级
-`super.onCleared()` 与多余 `}`（花括号 68/69），`[代码]` 静态判定无法编译；工作区修改正是删除这 3 行，
-把文件恢复到此前可编译的内容。`[实测]` 2026-10-26 用该工作树跑测试通过，但**修复尚未提交**。
-在提交前，任何从 HEAD 干净检出、CI 或出包都会失败。
-
-> 该 3 行修改**在本轮摸底之前就已存在于工作区**，不是本轮产生的改动。
-
-> 成因：`cb954b1` 手工把 `MealError.toSaveMessage()` 替换为 `data/MealErrorMessages.kt` 时误留了旧方法尾部两行。
+**HEAD 语法错误已解决**：已有 `AddVisitViewModel.kt` 三行删除修复现已纳入 `e8652d7`。
+`[实测]` 同一源码树的 v0.6.2 强制测试、Lint 与 Debug/Release 构建通过；当前提交不再有原 `cb954b1` 类体残留语句。
+历史起因与过程见 DEVELOPMENT_LOG，保留 R-01 ID 并关闭。
 
 ## 3. 功能现状
 
@@ -92,7 +87,7 @@
 
 | ID | 级别 | 风险 | 证据 | 状态 |
 |---|---|---|---|---|
-| R-01 | P0 | HEAD 不可编译，修复未提交 | `[代码]` 花括号 68/69 | **未解决** |
+| R-01 | P0 | 历史 HEAD `cb954b1` 类体残留语句无法编译 | `[实测]` v0.6.2 强制测试与构建通过；修复已纳入 `e8652d7` | **已解决（2026-10-26）** |
 | R-02 | P1 | 无设备：迁移、UI、无障碍、大字体、深色全未真机验证 | `[文档]`+`[实测]` adb 空 | 未解决 |
 | R-03 | P1 | **相机照片绕过 PhotoStore 处理链**：`createCameraTarget()` 让相机直接写 `files/photos`，四个 VM 只存路径，无 2048px / JPEG88 / EXIF / 32MB 上限；>32MB 照片可导出却会导致整包恢复失败 | `[代码]` `PhotoStore.kt:138-146`、四个 Screen/VM 回调 | 未解决（本次新发现） |
 | R-04 | P1 | 备份恢复内存/磁盘压力：4 份 JSON 各 32MB 全量读入，OOM 不被 `catch(Exception)` 捕获；2GB staging + 复制双份磁盘 | `[代码]` `BackupStore.kt:576-600` | 未压测 |
@@ -132,7 +127,7 @@
 
 ## 8. 下一步（按项目既定方针：验证能力优先于新增功能）
 
-1. 提交工作区 3 行修复，使 HEAD 可构建（**需用户逐轮确认 commit**）。
+1. 本地 v0.6.2 已打包且代码已提交；安装前备份、同类型覆盖。未授权 push，远端仍不变。
 2. 接一台设备执行增强后的 `AppDatabaseMigrationTest` 6 例；再做一次真实 SAF 往返。WebDAV 本地导出失败透传已补；网络/HTTP 分类与真实服务器往返仍需独立验收。
 3. 修复相机照片通道（`processCameraFile` + 导入占位/回收语义），并修正 `calculateSampleSize` 对 4000×3000 仍解原尺寸的问题。
 4. 实现 F03/F04 的导出对称限额与导入预算。
